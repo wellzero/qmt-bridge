@@ -95,7 +95,7 @@ class BridgeTraderCallback:
         Args:
             order: XtOrder 委托对象，包含委托详情。
         """
-        logger.debug("on_stock_order: %s", order)
+        logger.debug("on_stock_order: %s", _order_to_dict(order))
         self._dispatch({
             "type": "order",
             "data": _order_to_dict(order),
@@ -109,7 +109,7 @@ class BridgeTraderCallback:
         Args:
             trade: XtTrade 成交对象，包含成交详情。
         """
-        logger.debug("on_stock_trade: %s", trade)
+        logger.debug("on_stock_trade: %s", _trade_to_dict(trade))
         self._dispatch({
             "type": "trade",
             "data": _trade_to_dict(trade),
@@ -123,7 +123,7 @@ class BridgeTraderCallback:
         Args:
             order_error: 错误对象，包含错误代码和错误消息。
         """
-        logger.warning("on_order_error: %s", order_error)
+        logger.warning("on_order_error: %s", _error_to_dict(order_error))
         self._dispatch({
             "type": "order_error",
             "data": _error_to_dict(order_error),
@@ -137,7 +137,7 @@ class BridgeTraderCallback:
         Args:
             cancel_error: 错误对象，包含错误代码和错误消息。
         """
-        logger.warning("on_cancel_error: %s", cancel_error)
+        logger.warning("on_cancel_error: %s", _error_to_dict(cancel_error))
         self._dispatch({
             "type": "cancel_error",
             "data": _error_to_dict(cancel_error),
@@ -151,7 +151,7 @@ class BridgeTraderCallback:
         Args:
             response: 响应对象，包含分配的委托编号。
         """
-        logger.debug("on_order_stock_async_response: %s", response)
+        logger.debug("on_order_stock_async_response: %s", {"order_id": getattr(response, "order_id", None)})
         self._dispatch({
             "type": "async_response",
             "data": {"order_id": getattr(response, "order_id", None)},
@@ -165,7 +165,7 @@ class BridgeTraderCallback:
         Args:
             status: 账户状态对象。
         """
-        logger.info("on_account_status: %s", status)
+        logger.info("on_account_status: %s", str(status))
         self._dispatch({
             "type": "account_status",
             "data": {"status": str(status)},
@@ -184,7 +184,7 @@ class BridgeTraderCallback:
         Args:
             asset: XtAsset 资产对象，包含总资产、可用资金等。
         """
-        logger.debug("on_stock_asset: %s", asset)
+        logger.debug("on_stock_asset: %s", _asset_to_dict(asset))
         self._dispatch({
             "type": "asset",
             "data": _asset_to_dict(asset),
@@ -198,7 +198,7 @@ class BridgeTraderCallback:
         Args:
             position: XtPosition 持仓对象，包含持仓量、可用量等。
         """
-        logger.debug("on_stock_position: %s", position)
+        logger.debug("on_stock_position: %s", _position_to_dict(position))
         self._dispatch({
             "type": "position",
             "data": _position_to_dict(position),
@@ -212,7 +212,10 @@ class BridgeTraderCallback:
         Args:
             response: 响应对象，包含委托编号和撤单结果。
         """
-        logger.debug("on_cancel_order_stock_async_response: %s", response)
+        logger.debug("on_cancel_order_stock_async_response: %s", {
+            "order_id": getattr(response, "order_id", None),
+            "cancel_result": getattr(response, "cancel_result", None),
+        })
         self._dispatch({
             "type": "async_cancel_response",
             "data": {
@@ -229,7 +232,11 @@ class BridgeTraderCallback:
         Args:
             response: 响应对象，包含委托编号、错误代码和错误消息。
         """
-        logger.debug("on_smt_appointment_async_response: %s", response)
+        logger.debug("on_smt_appointment_async_response: %s", {
+            "order_id": getattr(response, "order_id", None),
+            "error_id": getattr(response, "error_id", None),
+            "error_msg": getattr(response, "error_msg", None),
+        })
         self._dispatch({
             "type": "smt_appointment_response",
             "data": {
