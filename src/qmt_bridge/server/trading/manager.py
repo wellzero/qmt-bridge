@@ -46,6 +46,7 @@ class XtTraderManager:
         self._trader = XtQuantTrader(path, session_id)
         self._account = StockAccount(self.account_id)
         self._callback = BridgeTraderCallback()
+        logger.info("XtQuantTrader init: session_id=%s, account_id=%s, path=%s", session_id, self.account_id, path)
 
         self._trader.register_callback(self._callback)
         self._trader.start()

@@ -115,7 +115,7 @@ def main():
     app_logger.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
     if not app_logger.handlers:
         handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter("%(levelname)s:     %(name)s - %(message)s"))
+        handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s:     %(name)s - %(message)s"))
         app_logger.addHandler(handler)
 
     import uvicorn
@@ -168,7 +168,7 @@ def scheduler_main():
     app_logger.setLevel(getattr(logging, args.log_level.upper(), logging.INFO))
     if not app_logger.handlers:
         handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter("%(levelname)s:     %(name)s - %(message)s"))
+        handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s:     %(name)s - %(message)s"))
         app_logger.addHandler(handler)
 
     settings = Settings.from_env()
