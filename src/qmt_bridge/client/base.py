@@ -29,6 +29,7 @@ class BaseClient:
         *,
         api_key: str = "",
         timeout: float = DEFAULT_TIMEOUT,
+        paper: bool = False,
     ):
         """初始化客户端连接。
 
@@ -37,11 +38,13 @@ class BaseClient:
             port: 服务端口，默认 8000
             api_key: API Key，交易端点需要认证时必填
             timeout: HTTP 请求超时（秒），默认 30s。设为 None 表示无超时（不推荐）。
+            paper: 是否使用模拟交易端点 ``/api/paper_trading/*``，默认关闭。
         """
         self.base_url = f"http://{host}:{port}"
         self.ws_url = f"ws://{host}:{port}"
         self.api_key = api_key
         self.timeout = timeout
+        self.paper = paper
         # Bypass proxy for direct connections to QMT Bridge server
         self._opener = urllib.request.build_opener(
             urllib.request.ProxyHandler({})  # empty dict = no proxies

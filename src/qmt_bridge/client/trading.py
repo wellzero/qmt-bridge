@@ -14,7 +14,12 @@
 
 
 class TradingMixin:
-    """交易操作客户端方法集合，对应 /api/trading/* 端点。"""
+    """交易操作客户端方法集合，对应 /api/trading/* 或 /api/paper_trading/* 端点。"""
+
+    @property
+    def _trading_prefix(self) -> str:
+        """根据 ``self.paper`` 返回交易端点前缀。"""
+        return "/api/paper_trading" if getattr(self, "paper", False) else "/api/trading"
 
     def place_order(
         self,
@@ -42,7 +47,7 @@ class TradingMixin:
         Returns:
             包含 ``order_id`` 等委托结果的字典
         """
-        return self._post("/api/trading/order", {
+        return self._post(f"{self._trading_prefix}/order", {
             "stock_code": stock_code,
             "order_type": order_type,
             "order_volume": order_volume,
@@ -63,7 +68,7 @@ class TradingMixin:
         Returns:
             撤单结果
         """
-        return self._post("/api/trading/cancel", {
+        return self._post(f"{self._trading_prefix}/cancel", {
             "order_id": order_id,
             "account_id": account_id,
         })
@@ -81,7 +86,7 @@ class TradingMixin:
         Returns:
             撤单结果
         """
-        return self._post("/api/trading/cancel_by_sysid", {
+        return self._post(f"{self._trading_prefix}/cancel_by_sysid", {
             "market": market,
             "sysid": sysid,
             "account_id": account_id,
@@ -100,7 +105,7 @@ class TradingMixin:
         Returns:
             包含请求序号的字典
         """
-        return self._post("/api/trading/cancel_by_sysid_async", {
+        return self._post(f"{self._trading_prefix}/cancel_by_sysid_async", {
             "market": market,
             "sysid": sysid,
             "account_id": account_id,
@@ -116,7 +121,7 @@ class TradingMixin:
         Returns:
             委托列表数据
         """
-        return self._get("/api/trading/orders", {
+        return self._get(f"{self._trading_prefix}/orders", {
             "account_id": account_id,
             "cancelable_only": cancelable_only,
         })
@@ -130,7 +135,7 @@ class TradingMixin:
         Returns:
             持仓列表数据
         """
-        return self._get("/api/trading/positions", {"account_id": account_id})
+        return self._get(f"{self._trading_prefix}/positions", {"account_id": account_id})
 
     def query_asset(self, account_id: str = "") -> dict:
         """查询账户资产信息。
@@ -141,7 +146,7 @@ class TradingMixin:
         Returns:
             账户资产信息字典
         """
-        return self._get("/api/trading/asset", {"account_id": account_id})
+        return self._get(f"{self._trading_prefix}/asset", {"account_id": account_id})
 
     def query_trades(self, account_id: str = "") -> dict:
         """查询当日成交记录。
@@ -152,7 +157,7 @@ class TradingMixin:
         Returns:
             成交记录列表数据
         """
-        return self._get("/api/trading/trades", {"account_id": account_id})
+        return self._get(f"{self._trading_prefix}/trades", {"account_id": account_id})
 
     def query_order_detail(self, order_id: int, account_id: str = "") -> dict:
         """查询指定委托的详细信息。
@@ -164,7 +169,7 @@ class TradingMixin:
         Returns:
             委托详情字典
         """
-        return self._get("/api/trading/order_detail", {
+        return self._get(f"{self._trading_prefix}/order_detail", {
             "order_id": order_id,
             "account_id": account_id,
         })
@@ -178,7 +183,7 @@ class TradingMixin:
         Returns:
             批量下单结果
         """
-        return self._post("/api/trading/batch_order", orders)
+        return self._post(f"{self._trading_prefix}/batch_order", orders)
 
     def batch_cancel(self, cancel_requests: list[dict]) -> dict:
         """批量撤单。
@@ -189,7 +194,7 @@ class TradingMixin:
         Returns:
             批量撤单结果
         """
-        return self._post("/api/trading/batch_cancel", cancel_requests)
+        return self._post(f"{self._trading_prefix}/batch_cancel", cancel_requests)
 
     def get_account_status(self, account_id: str = "") -> dict:
         """获取交易账户连接状态。
@@ -200,7 +205,7 @@ class TradingMixin:
         Returns:
             连接状态信息
         """
-        return self._get("/api/trading/account_status", {"account_id": account_id})
+        return self._get(f"{self._trading_prefix}/account_status", {"account_id": account_id})
 
     def query_account_status_detail(self) -> dict:
         """查询账户状态详情。
@@ -208,7 +213,7 @@ class TradingMixin:
         Returns:
             账户状态详情
         """
-        return self._get("/api/trading/account_status_detail")
+        return self._get(f"{self._trading_prefix}/account_status_detail")
 
     def query_secu_account(self, account_id: str = "") -> dict:
         """查询证券子账户。
@@ -219,7 +224,7 @@ class TradingMixin:
         Returns:
             证券子账户信息
         """
-        return self._get("/api/trading/secu_account", {"account_id": account_id})
+        return self._get(f"{self._trading_prefix}/secu_account", {"account_id": account_id})
 
     # ------------------------------------------------------------------
     # 异步委托/撤单
@@ -243,7 +248,7 @@ class TradingMixin:
         Returns:
             包含请求序号的字典
         """
-        return self._post("/api/trading/order_async", {
+        return self._post(f"{self._trading_prefix}/order_async", {
             "stock_code": stock_code,
             "order_type": order_type,
             "order_volume": order_volume,
@@ -264,7 +269,7 @@ class TradingMixin:
         Returns:
             包含请求序号的字典
         """
-        return self._post("/api/trading/cancel_async", {
+        return self._post(f"{self._trading_prefix}/cancel_async", {
             "order_id": order_id,
             "account_id": account_id,
         })
@@ -283,7 +288,7 @@ class TradingMixin:
         Returns:
             委托信息字典
         """
-        return self._get(f"/api/trading/order/{order_id}", {"account_id": account_id})
+        return self._get(f"{self._trading_prefix}/order/{order_id}", {"account_id": account_id})
 
     def query_single_trade(self, trade_id: int, account_id: str = "") -> dict:
         """查询单笔成交。
@@ -295,7 +300,7 @@ class TradingMixin:
         Returns:
             成交信息字典
         """
-        return self._get(f"/api/trading/trade/{trade_id}", {"account_id": account_id})
+        return self._get(f"{self._trading_prefix}/trade/{trade_id}", {"account_id": account_id})
 
     def query_single_position(self, stock_code: str, account_id: str = "") -> dict:
         """查询单只股票的持仓。
@@ -307,7 +312,7 @@ class TradingMixin:
         Returns:
             单只股票持仓信息字典
         """
-        return self._get(f"/api/trading/position/{stock_code}", {"account_id": account_id})
+        return self._get(f"{self._trading_prefix}/position/{stock_code}", {"account_id": account_id})
 
     # ------------------------------------------------------------------
     # 新股申购
@@ -322,7 +327,7 @@ class TradingMixin:
         Returns:
             申购额度信息
         """
-        return self._get("/api/trading/new_purchase_limit", {"account_id": account_id})
+        return self._get(f"{self._trading_prefix}/new_purchase_limit", {"account_id": account_id})
 
     def query_ipo_data(self) -> dict:
         """查询当前 IPO 日历数据。
@@ -330,7 +335,7 @@ class TradingMixin:
         Returns:
             IPO 日历数据
         """
-        return self._get("/api/trading/ipo_data")
+        return self._get(f"{self._trading_prefix}/ipo_data")
 
     # ------------------------------------------------------------------
     # 多账户信息
@@ -342,7 +347,7 @@ class TradingMixin:
         Returns:
             全部交易账户信息字典
         """
-        return self._get("/api/trading/account_infos")
+        return self._get(f"{self._trading_prefix}/account_infos")
 
     # ------------------------------------------------------------------
     # COM 查询（期权/期货专用账户）
@@ -357,7 +362,7 @@ class TradingMixin:
         Returns:
             COM 账户资金信息
         """
-        return self._get("/api/trading/com_fund", {"account_id": account_id})
+        return self._get(f"{self._trading_prefix}/com_fund", {"account_id": account_id})
 
     def query_com_position(self, account_id: str = "") -> dict:
         """查询 COM 账户持仓（期权/期货账户）。
@@ -368,7 +373,7 @@ class TradingMixin:
         Returns:
             COM 账户持仓信息
         """
-        return self._get("/api/trading/com_position", {"account_id": account_id})
+        return self._get(f"{self._trading_prefix}/com_position", {"account_id": account_id})
 
     # ------------------------------------------------------------------
     # 数据导出 / 外部同步（对齐 xttrader 真实签名）
@@ -396,7 +401,7 @@ class TradingMixin:
         Returns:
             导出结果
         """
-        return self._post("/api/trading/export_data", {
+        return self._post(f"{self._trading_prefix}/export_data", {
             "result_path": result_path,
             "data_type": data_type,
             "start_time": start_time,
@@ -427,7 +432,7 @@ class TradingMixin:
         Returns:
             查询结果
         """
-        return self._post("/api/trading/query_data", {
+        return self._post(f"{self._trading_prefix}/query_data", {
             "result_path": result_path,
             "data_type": data_type,
             "start_time": start_time,
@@ -454,7 +459,7 @@ class TradingMixin:
         Returns:
             同步结果
         """
-        return self._post("/api/trading/sync_transaction", {
+        return self._post(f"{self._trading_prefix}/sync_transaction", {
             "operation": operation,
             "data_type": data_type,
             "deal_list": deal_list,
