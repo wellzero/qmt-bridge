@@ -33,6 +33,15 @@ LATEST_PRICE = 5
 FIX_PRICE = 11
 
 
+def _extract_price_from_tick(tick_data: dict) -> float | None:
+    """从 ``get_full_tick`` 返回的单只股票 tick 字典中提取有效价格。"""
+    for key in ("lastPrice", "close", "open", "lastprice"):
+        price = tick_data.get(key)
+        if isinstance(price, (int, float)) and price > 0:
+            return float(price)
+    return None
+
+
 class PriceSource(Protocol):
     """价格源协议。"""
 
@@ -63,18 +72,18 @@ class XtdataPriceSource:
             if isinstance(tick, dict):
                 data = tick.get(stock_code)
                 if isinstance(data, dict):
-                    # 优先使用最新价，其次收盘价/开盘价
-                    for key in ("lastPrice", "close", "open", "lastprice"):
-                        price = data.get(key)
-                        if isinstance(price, (int, float)) and price > 0:
-                            return float(price)
+                    return _extract_price_from_tick(data)
         except Exception:
             logger.exception("XtdataPriceSource 获取 %s 价格失败", stock_code)
         return None
 
 
 class StaticPriceSource:
-    """静态价格源，用于测试或无行情环境。"""
+    """静态价格源，用于测试或无行情环境。
+
+    支持从 ``xtquant.xtdata.get_full_tick`` 下载行情数据并缓存为静态价格，
+    便于在模拟交易中快速初始化或更新多只股票的参考价。
+    """
 
     def __init__(self, prices: dict[str, float] | None = None):
         self.prices = dict(prices or {})
@@ -85,6 +94,50 @@ class StaticPriceSource:
     def set_price(self, stock_code: str, price: float) -> None:
         """设置或更新某只股票的静态价格。"""
         self.prices[stock_code] = price
+
+    def download_prices(self, stock_codes: list[str]) -> dict[str, float]:
+        """从 ``xtquant.xtdata.get_full_tick`` 下载指定股票最新价。
+
+        下载成功的价格会合并到 ``self.prices`` 中；下载失败的股票会被跳过并记录日志。
+
+        Args:
+            stock_codes: 待下载的股票代码列表，例如 ``["000001.SZ", "600519.SH"]``。
+
+        Returns:
+            本次成功下载的价格字典 ``{stock_code: price}``。
+        """
+        downloaded: dict[str, float] = {}
+        if not stock_codes:
+            return downloaded
+
+        try:
+            from xtquant import xtdata
+        except Exception:
+            logger.warning("xtquant.xtdata 未安装或不可用，无法下载静态价格")
+            return downloaded
+
+        try:
+            ticks = xtdata.get_full_tick(stock_codes)
+            if not isinstance(ticks, dict):
+                logger.warning("get_full_tick 返回格式异常: %s", type(ticks))
+                return downloaded
+        except Exception:
+            logger.exception("StaticPriceSource 下载行情数据失败")
+            return downloaded
+
+        for stock_code in stock_codes:
+            data = ticks.get(stock_code)
+            if not isinstance(data, dict):
+                logger.warning("未能获取 %s 的 tick 数据", stock_code)
+                continue
+            price = _extract_price_from_tick(data)
+            if price is None:
+                logger.warning("未能从 %s 的 tick 数据中提取有效价格", stock_code)
+                continue
+            self.prices[stock_code] = price
+            downloaded[stock_code] = price
+
+        return downloaded
 
 
 class FallbackPriceSource:

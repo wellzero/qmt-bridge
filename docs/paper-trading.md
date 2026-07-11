@@ -137,7 +137,63 @@ sequenceDiagram
     Router-->>Client: {data: config}
 ```
 
-### 3. 下单与撮合
+### 3. 下载静态价格
+
+当使用 `static` 或 `fallback` 价格源时，可通过 xtquant 接口批量下载最新行情并写入账户的 `static_prices`，免去手动维护价格表。
+
+```mermaid
+sequenceDiagram
+    participant Client as HTTP Client
+    participant Router as /api/paper_accounts/{account_id}/download_prices POST
+    participant PM as PaperTraderManager
+    participant PT as PaperQuantTrader
+    participant Config as PaperAccountConfigManager
+    participant Source as StaticPriceSource
+    participant XT as xtquant.xtdata
+
+    Client->>Router: DownloadPricesRequest(["000001.SZ", "600519.SH"])
+    Router->>PM: download_prices(account_id, stock_codes)
+    PM->>PT: get_account_config(account_id)
+    PT-->>PM: PaperAccountConfig
+    PM->>Source: StaticPriceSource(config.static_prices)
+    PM->>Source: download_prices(stock_codes)
+    Source->>XT: get_full_tick(stock_codes)
+    XT-->>Source: {code: tick}
+    Source->>Source: 提取 lastPrice/close/open 并合并到 prices
+    Source-->>PM: {code: price}
+    PM->>Config: set_config(updated_config)
+    Config->>Config: 写 config.json
+    PM-->>Router: downloaded
+    Router-->>Client: {data: {code: price}}
+```
+
+请求示例：
+
+```bash
+curl -X POST "http://localhost:8000/api/paper_accounts/acc001/download_prices" \
+  -H "X-API-Key: your-secret-key" \
+  -H "Content-Type: application/json" \
+  -d '{"stock_codes": ["000001.SZ", "600519.SH"]}'
+```
+
+响应示例：
+
+```json
+{
+  "data": {
+    "000001.SZ": 12.34,
+    "600519.SH": 567.89
+  }
+}
+```
+
+说明：
+
+- 仅下载成功的股票会出现在响应中；失败股票会被跳过并记录 warning 日志。
+- 下载后的价格会自动保存到对应账户配置的 `static_prices`，后续 `static`/`fallback` 撮合将使用这些价格。
+- 该端点依赖 xtquant，仅在 QMT 客户端可用时能成功取到行情。
+
+### 4. 下单与撮合
 
 ```mermaid
 sequenceDiagram
@@ -179,7 +235,7 @@ sequenceDiagram
     Router-->>Client: {order_id, status: submitted}
 ```
 
-### 4. 查询资产
+### 5. 查询资产
 
 ```mermaid
 sequenceDiagram
@@ -201,7 +257,7 @@ sequenceDiagram
     Router-->>Client: {data: XtAsset}
 ```
 
-### 5. 撤单
+### 6. 撤单
 
 ```mermaid
 sequenceDiagram
@@ -229,7 +285,7 @@ sequenceDiagram
     Router-->>Client: {status: ok, data: result}
 ```
 
-### 6. 业绩汇总
+### 7. 业绩汇总
 
 ```mermaid
 sequenceDiagram

@@ -104,3 +104,11 @@ class PaperAccountConfigManager:
             initial_cash=config.initial_cash,
         )
         return state
+
+
+class DownloadPricesRequest(BaseModel):
+    """批量下载静态价格请求。"""
+
+    stock_codes: list[str] = Field(
+        ..., description='待下载的股票代码列表，例如 ["000001.SZ", "600519.SH"]'
+    )

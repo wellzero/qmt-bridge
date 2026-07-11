@@ -10,7 +10,12 @@ import pytest
 from qmt_bridge.server.paper_trading import PaperQuantTrader, PaperTraderManager
 from qmt_bridge.server.paper_trading.account import ORDER_SUCCEEDED
 from qmt_bridge.server.paper_trading.config import PaperAccountConfig
-from qmt_bridge.server.paper_trading.engine import FIX_PRICE, STOCK_BUY, STOCK_SELL
+from qmt_bridge.server.paper_trading.engine import (
+    FIX_PRICE,
+    STOCK_BUY,
+    STOCK_SELL,
+    StaticPriceSource,
+)
 from qmt_bridge.server.paper_trading.papertrader import PaperAccount
 
 
@@ -285,6 +290,127 @@ def test_router_endpoints(temp_data_dir: Path):
     assert resp.status_code == 200
     data = resp.json()["data"]
     assert data["total_asset"] == pytest.approx(100000.0)
+
+
+def test_router_download_prices_with_mock(temp_data_dir: Path):
+    """下载静态价格端点集成测试（mock xtquant）。"""
+    pytest.importorskip("xtquant")
+
+    from unittest.mock import MagicMock, patch
+
+    from fastapi.testclient import TestClient
+
+    from qmt_bridge.server.app import create_app
+    from qmt_bridge.server.config import Settings, reset_settings
+
+    settings = Settings(
+        host="0.0.0.0",
+        port=8000,
+        api_key="test-key",
+        paper_trading_enabled=True,
+        paper_trading_data_dir=str(temp_data_dir),
+    )
+    reset_settings(settings)
+
+    app = create_app(settings)
+    client = TestClient(app)
+    headers = {"X-API-Key": "test-key"}
+
+    # 创建账户
+    resp = client.post(
+        "/api/paper_accounts",
+        headers=headers,
+        json={
+            "account_id": "api_download",
+            "initial_cash": 100000.0,
+            "price_source": "static",
+            "static_prices": {},
+        },
+    )
+    assert resp.status_code == 200
+
+    mock_xtdata = MagicMock()
+    mock_xtdata.get_full_tick.return_value = {
+        "000001.SZ": {"lastPrice": 12.34},
+        "600519.SH": {"close": 567.89},
+    }
+    mock_xtquant_module = MagicMock()
+    mock_xtquant_module.xtdata = mock_xtdata
+
+    with patch.dict("sys.modules", {"xtquant": mock_xtquant_module}):
+        resp = client.post(
+            "/api/paper_accounts/api_download/download_prices",
+            headers=headers,
+            json={"stock_codes": ["000001.SZ", "600519.SH"]},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["000001.SZ"] == pytest.approx(12.34)
+    assert data["600519.SH"] == pytest.approx(567.89)
+
+    # 验证配置已持久化
+    resp = client.get("/api/paper_accounts/api_download", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["data"]["static_prices"]["000001.SZ"] == pytest.approx(12.34)
+
+
+def test_static_price_source_download_with_mock():
+    """StaticPriceSource 从 xtquant 下载价格（mock）。"""
+    from unittest.mock import MagicMock, patch
+
+    source = StaticPriceSource(prices={"old.SZ": 5.0})
+
+    mock_xtdata = MagicMock()
+    mock_xtdata.get_full_tick.return_value = {
+        "000001.SZ": {"lastPrice": 12.34},
+        "600519.SH": {"close": 567.89},
+        "bad.SZ": {},
+    }
+    mock_xtquant_module = MagicMock()
+    mock_xtquant_module.xtdata = mock_xtdata
+
+    with patch.dict("sys.modules", {"xtquant": mock_xtquant_module}):
+        downloaded = source.download_prices(["000001.SZ", "600519.SH", "bad.SZ"])
+
+    assert downloaded == {"000001.SZ": 12.34, "600519.SH": 567.89}
+    assert source.prices["000001.SZ"] == pytest.approx(12.34)
+    assert source.prices["600519.SH"] == pytest.approx(567.89)
+    assert source.prices["old.SZ"] == pytest.approx(5.0)
+
+
+def test_manager_download_prices_with_mock(temp_data_dir: Path):
+    """PaperTraderManager 下载并保存静态价格（mock）。"""
+    from unittest.mock import MagicMock, patch
+
+    manager = PaperTraderManager(data_dir=temp_data_dir)
+    manager.connect()
+
+    config = PaperAccountConfig(
+        account_id="acc_download",
+        initial_cash=100000.0,
+        price_source="static",
+        static_prices={},
+    )
+    manager.create_or_update_account(config)
+
+    mock_xtdata = MagicMock()
+    mock_xtdata.get_full_tick.return_value = {
+        "000001.SZ": {"lastPrice": 12.34},
+    }
+    mock_xtquant_module = MagicMock()
+    mock_xtquant_module.xtdata = mock_xtdata
+
+    with patch.dict("sys.modules", {"xtquant": mock_xtquant_module}):
+        downloaded = manager.download_prices("acc_download", ["000001.SZ"])
+
+    assert downloaded == {"000001.SZ": 12.34}
+
+    updated_config = manager.get_account_config("acc_download")
+    assert updated_config is not None
+    assert updated_config.static_prices["000001.SZ"] == pytest.approx(12.34)
+
+    manager.disconnect()
 
 
 def datetime_now_str() -> str:

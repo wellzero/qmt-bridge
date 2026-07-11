@@ -13,7 +13,7 @@ from ..deps import get_paper_trader_manager
 from ..helpers import _numpy_to_python, ok_response
 from ..models import CancelRequest, OrderRequest
 from ..security import require_api_key
-from .config import PaperAccountConfig
+from .config import DownloadPricesRequest, PaperAccountConfig
 from .manager import PaperTraderManager
 
 router = APIRouter(
@@ -75,6 +75,17 @@ def reset_paper_account(
     """重置模拟账户（清空持仓、委托、成交，资金恢复初始值）。"""
     result = manager.reset_account(account_id)
     return ok_response(result)
+
+
+@router.post("/paper_accounts/{account_id}/download_prices")
+def download_paper_account_prices(
+    account_id: str,
+    req: DownloadPricesRequest,
+    manager: PaperTraderManager = Depends(get_paper_trader_manager),
+):
+    """从 xtquant 下载指定股票的最新价，并更新账户静态价格配置。"""
+    downloaded = manager.download_prices(account_id, req.stock_codes)
+    return ok_response(_numpy_to_python(downloaded))
 
 
 # ── 模拟交易操作 ──

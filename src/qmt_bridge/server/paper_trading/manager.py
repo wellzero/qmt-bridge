@@ -112,6 +112,37 @@ class PaperTraderManager:
             return False
         return self._trader.delete_account(account_id)
 
+    def download_prices(
+        self, account_id: str, stock_codes: list[str]
+    ) -> dict[str, float]:
+        """从 xtquant 下载指定股票的最新价，并更新账户的静态价格配置。
+
+        Args:
+            account_id: 模拟账户 ID。
+            stock_codes: 股票代码列表。
+
+        Returns:
+            成功下载并更新的价格字典。
+
+        Raises:
+            RuntimeError: PaperQuantTrader 未连接。
+            ValueError: 账户不存在。
+        """
+        if self._trader is None:
+            raise RuntimeError("PaperQuantTrader is not connected")
+        config = self._trader._config_manager.get_config(account_id)
+        if config is None:
+            raise ValueError(f"Paper account {account_id} does not exist")
+
+        from .engine import StaticPriceSource
+
+        source = StaticPriceSource(config.static_prices)
+        downloaded = source.download_prices(stock_codes)
+        if downloaded:
+            config.static_prices = source.prices
+            self._trader._config_manager.set_config(config)
+        return downloaded
+
     def get_summary(self, account_id: str = "") -> AccountSummary | None:
         if self._trader is None:
             return None
