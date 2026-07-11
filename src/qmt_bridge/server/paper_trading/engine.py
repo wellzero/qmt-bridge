@@ -1,0 +1,267 @@
+"""模拟交易撮合引擎与价格源模块。
+
+撮合引擎负责根据行情价格决定委托是否成交、成交价、手续费，
+并更新账户资金与持仓。价格源支持真实行情（xtdata）、静态价格和自动回退三种模式。
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Protocol
+
+from .account import (
+    ORDER_JUNK,
+    ORDER_SUCCEEDED,
+    AccountState,
+    OrderState,
+    TradeRecord,
+)
+
+if TYPE_CHECKING:
+    from .config import PaperAccountConfig
+
+logger = logging.getLogger("qmt_bridge.paper_trading")
+
+
+# 委托类型常量（与 xtconstant 对齐）
+STOCK_BUY = 23
+STOCK_SELL = 24
+
+# 报价类型常量
+LATEST_PRICE = 5
+FIX_PRICE = 11
+
+
+class PriceSource(Protocol):
+    """价格源协议。"""
+
+    def get_price(self, stock_code: str) -> float | None:
+        """获取指定股票的最新价。"""
+        ...
+
+
+class XtdataPriceSource:
+    """基于 ``xtquant.xtdata.get_full_tick`` 的真实行情价格源。"""
+
+    def __init__(self):
+        self._xtdata = None
+        try:
+            from xtquant import xtdata
+
+            self._xtdata = xtdata
+        except Exception:
+            logger.warning(
+                "xtquant.xtdata 未安装或不可用，XtdataPriceSource 将始终返回 None"
+            )
+
+    def get_price(self, stock_code: str) -> float | None:
+        if self._xtdata is None:
+            return None
+        try:
+            tick = self._xtdata.get_full_tick([stock_code])
+            if isinstance(tick, dict):
+                data = tick.get(stock_code)
+                if isinstance(data, dict):
+                    # 优先使用最新价，其次收盘价/开盘价
+                    for key in ("lastPrice", "close", "open", "lastprice"):
+                        price = data.get(key)
+                        if isinstance(price, (int, float)) and price > 0:
+                            return float(price)
+        except Exception:
+            logger.exception("XtdataPriceSource 获取 %s 价格失败", stock_code)
+        return None
+
+
+class StaticPriceSource:
+    """静态价格源，用于测试或无行情环境。"""
+
+    def __init__(self, prices: dict[str, float] | None = None):
+        self.prices = dict(prices or {})
+
+    def get_price(self, stock_code: str) -> float | None:
+        return self.prices.get(stock_code)
+
+    def set_price(self, stock_code: str, price: float) -> None:
+        """设置或更新某只股票的静态价格。"""
+        self.prices[stock_code] = price
+
+
+class FallbackPriceSource:
+    """回退价格源：优先 xtdata，失败时使用静态价格。
+
+    对于限价单，若外部价格源均不可用，可进一步以委托价作为成交价。
+    """
+
+    def __init__(
+        self,
+        xtdata_source: PriceSource | None = None,
+        static_source: StaticPriceSource | None = None,
+    ):
+        self.xtdata_source = xtdata_source or XtdataPriceSource()
+        self.static_source = static_source or StaticPriceSource()
+
+    def get_price(self, stock_code: str) -> float | None:
+        price = self.xtdata_source.get_price(stock_code)
+        if price is None:
+            price = self.static_source.get_price(stock_code)
+        return price
+
+
+@dataclass
+class FillResult:
+    """单次撮合结果。"""
+
+    traded_volume: int
+    traded_price: float
+    traded_amount: float
+    commission: float
+    stamp_tax: float
+
+
+def _now_str() -> str:
+    """当前时间字符串（HH:MM:SS 格式）。"""
+    from datetime import datetime
+
+    return datetime.now().strftime("%H:%M:%S")
+
+
+class MatchingEngine:
+    """模拟撮合引擎。
+
+    根据价格源和账户配置，对单笔委托执行即时全量成交。
+    买入校验可用资金，卖出校验可用持仓；成交后更新账户资金、持仓和委托状态。
+    """
+
+    def __init__(self, price_source: PriceSource | None = None):
+        self.price_source = price_source or FallbackPriceSource()
+
+    def resolve_fill_price(
+        self,
+        order: OrderState,
+        config: PaperAccountConfig,
+    ) -> float | None:
+        """确定成交价。
+
+        - 限价单：以委托价成交（若委托价 > 0）
+        - 市价/最新价：从价格源获取，并叠加滑点
+        """
+        if order.price_type == FIX_PRICE and order.price > 0:
+            base_price = order.price
+        else:
+            base_price = self.price_source.get_price(order.stock_code)
+            if base_price is None:
+                return None
+
+        if order.order_type == STOCK_BUY:
+            return round(base_price * (1 + config.slippage), 4)
+        return round(base_price * (1 - config.slippage), 4)
+
+    def match(
+        self,
+        order: OrderState,
+        account: AccountState,
+        config: PaperAccountConfig,
+    ) -> TradeRecord | None:
+        """对委托执行一次撮合。
+
+        当前版本默认整单成交；若价格源不可用或资金/持仓不足，
+        则将委托标记为废单并返回 None。
+
+        Args:
+            order: 待撮合委托。
+            account: 委托所属账户状态。
+            config: 账户级配置（手续费、滑点等）。
+
+        Returns:
+            若成交则返回 ``TradeRecord``，否则返回 None。
+        """
+        fill_price = self.resolve_fill_price(order, config)
+        if fill_price is None or fill_price <= 0:
+            order.order_status = ORDER_JUNK
+            order.status_msg = "无法获取有效成交价格"
+            return None
+
+        volume = order.order_volume
+        traded_amount = round(fill_price * volume, 4)
+        commission = round(traded_amount * config.commission_rate, 4)
+        stamp_tax = round(
+            traded_amount * config.stamp_tax_rate
+            if order.order_type == STOCK_SELL
+            else 0,
+            4,
+        )
+
+        with account._lock:
+            if order.order_type == STOCK_BUY:
+                total_cost = traded_amount + commission + stamp_tax
+                if account.cash < total_cost:
+                    order.order_status = ORDER_JUNK
+                    order.status_msg = "可用资金不足"
+                    return None
+                account.cash -= total_cost
+            elif order.order_type == STOCK_SELL:
+                position = account.get_position(order.stock_code)
+                if position is None or position.can_use_volume < volume:
+                    order.order_status = ORDER_JUNK
+                    order.status_msg = "可用持仓不足"
+                    return None
+                old_avg_price = position.avg_price
+                position.can_use_volume -= volume
+                position.volume -= volume
+                if position.volume == 0:
+                    account.positions.pop(order.stock_code, None)
+                account.cash += traded_amount - commission - stamp_tax
+                realized_pnl = (
+                    traded_amount - volume * old_avg_price - commission - stamp_tax
+                )
+            else:
+                order.order_status = ORDER_JUNK
+                order.status_msg = "不支持的委托类型"
+                return None
+
+            # 更新买入后的持仓
+            if order.order_type == STOCK_BUY:
+                position = account.get_or_create_position(order.stock_code)
+                total_cost_basis = position.avg_price * position.volume + traded_amount
+                position.volume += volume
+                position.can_use_volume += volume
+                position.avg_price = (
+                    round(total_cost_basis / position.volume, 4)
+                    if position.volume > 0
+                    else 0.0
+                )
+                position.last_price = fill_price
+
+            # 更新委托状态为已成
+            order.traded_volume = volume
+            order.traded_price = fill_price
+            order.order_status = ORDER_SUCCEEDED
+            order.status_msg = "已成"
+
+            trade = TradeRecord(
+                account_id=account.account_id,
+                stock_code=order.stock_code,
+                order_id=order.order_id,
+                order_type=order.order_type,
+                traded_id=0,  # 由 PaperQuantTrader 统一生成
+                traded_time=_now_str(),
+                traded_price=fill_price,
+                traded_volume=volume,
+                traded_amount=traded_amount,
+                commission=commission,
+                stamp_tax=stamp_tax,
+                realized_pnl=realized_pnl if order.order_type == STOCK_SELL else 0.0,
+                strategy_name=order.strategy_name,
+                order_remark=order.order_remark,
+            )
+            account.trades.append(trade)
+            return trade
+
+    def update_position_prices(self, account: AccountState) -> None:
+        """刷新账户内所有持仓的最新价与市值。"""
+        with account._lock:
+            for position in account.positions.values():
+                price = self.price_source.get_price(position.stock_code)
+                if price is not None and price > 0:
+                    position.last_price = round(price, 4)

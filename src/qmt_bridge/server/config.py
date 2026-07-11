@@ -16,7 +16,7 @@
 """
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -63,39 +63,46 @@ class Settings:
     """
 
     # ---- 服务器基础配置 ----
-    host: str = "0.0.0.0"       # 监听地址，默认监听所有网卡
-    port: int = 8000             # 监听端口
-    log_level: str = "info"      # 日志级别（传递给 uvicorn）
-    workers: int = 1             # 工作进程数（Windows 下建议为 1）
+    host: str = "0.0.0.0"  # 监听地址，默认监听所有网卡
+    port: int = 8000  # 监听端口
+    log_level: str = "info"  # 日志级别（传递给 uvicorn）
+    workers: int = 1  # 工作进程数（Windows 下建议为 1）
 
     # ---- 安全认证配置 ----
-    api_key: str = ""                    # API 密钥（为空表示未配置认证）
+    api_key: str = ""  # API 密钥（为空表示未配置认证）
     require_auth_for_data: bool = False  # 是否对数据查询接口也要求认证
 
     # ---- 交易模块配置（底层使用 xtquant.xttrader）----
-    trading_enabled: bool = False   # 是否启用交易模块
-    mini_qmt_path: str = ""        # miniQMT 客户端安装路径
-    trading_account_id: str = ""   # 交易资金账号 ID
+    trading_enabled: bool = False  # 是否启用交易模块
+    mini_qmt_path: str = ""  # miniQMT 客户端安装路径
+    trading_account_id: str = ""  # 交易资金账号 ID
+
+    # ---- 模拟交易模块配置 ----
+    paper_trading_enabled: bool = False  # 是否启用模拟交易模块
+    paper_trading_data_dir: str = ""  # 模拟交易数据目录
+    paper_trading_config_path: str = ""  # 模拟交易配置文件路径（可选）
 
     # ---- 通知模块配置 ----
-    notify_enabled: bool = False   # 是否启用通知推送
-    notify_backends: str = ""      # 通知后端，逗号分隔，如 "feishu", "webhook", "feishu,webhook"
-    notify_event_types: str = ""   # 允许推送的事件类型（逗号分隔），为空表示全部允许
+    notify_enabled: bool = False  # 是否启用通知推送
+    notify_backends: str = (
+        ""  # 通知后端，逗号分隔，如 "feishu", "webhook", "feishu,webhook"
+    )
+    notify_event_types: str = ""  # 允许推送的事件类型（逗号分隔），为空表示全部允许
     notify_ignore_event_types: str = ""  # 排除的事件类型（逗号分隔）
 
     # ---- 飞书 Webhook 配置 ----
-    feishu_webhook_url: str = ""     # 飞书机器人 Webhook 地址
+    feishu_webhook_url: str = ""  # 飞书机器人 Webhook 地址
     feishu_webhook_secret: str = ""  # 飞书 Webhook v2 签名密钥（可选）
 
     # ---- 通用 Webhook 配置 ----
-    webhook_url: str = ""       # 通用 Webhook 回调地址
-    webhook_secret: str = ""    # Webhook 密钥（通过 X-Webhook-Secret 请求头发送）
+    webhook_url: str = ""  # 通用 Webhook 回调地址
+    webhook_secret: str = ""  # Webhook 密钥（通过 X-Webhook-Secret 请求头发送）
 
     # ---- 定时下载调度配置 ----
-    scheduler_kline_enabled: bool = True         # 是否启用 K 线增量下载
-    scheduler_kline_periods: str = "1d,5m,1m"    # K 线周期，逗号分隔
+    scheduler_kline_enabled: bool = True  # 是否启用 K 线增量下载
+    scheduler_kline_periods: str = "1d,5m,1m"  # K 线周期，逗号分隔
     scheduler_kline_sectors: str = "沪深A股,沪深ETF,沪深指数"  # K 线下载板块
-    scheduler_financial_enabled: bool = True      # 是否启用财务数据增量下载
+    scheduler_financial_enabled: bool = True  # 是否启用财务数据增量下载
     scheduler_financial_sectors: str = "沪深A股"  # 财务数据只对 A 股有意义
 
     @classmethod
@@ -122,29 +129,30 @@ class Settings:
                 "QMT_BRIDGE_REQUIRE_AUTH_FOR_DATA", ""
             ).lower()
             in ("1", "true", "yes"),
-            trading_enabled=os.environ.get(
-                "QMT_BRIDGE_TRADING_ENABLED", ""
-            ).lower()
+            trading_enabled=os.environ.get("QMT_BRIDGE_TRADING_ENABLED", "").lower()
             in ("1", "true", "yes"),
             mini_qmt_path=os.environ.get("QMT_BRIDGE_MINI_QMT_PATH", ""),
-            trading_account_id=os.environ.get(
-                "QMT_BRIDGE_TRADING_ACCOUNT_ID", ""
-            ),
-            # 通知相关配置
-            notify_enabled=os.environ.get(
-                "QMT_BRIDGE_NOTIFY_ENABLED", ""
+            trading_account_id=os.environ.get("QMT_BRIDGE_TRADING_ACCOUNT_ID", ""),
+            # 模拟交易相关配置
+            paper_trading_enabled=os.environ.get(
+                "QMT_BRIDGE_PAPER_TRADING_ENABLED", ""
             ).lower()
             in ("1", "true", "yes"),
-            notify_backends=os.environ.get("QMT_BRIDGE_NOTIFY_BACKENDS", ""),
-            notify_event_types=os.environ.get(
-                "QMT_BRIDGE_NOTIFY_EVENT_TYPES", ""
+            paper_trading_data_dir=os.environ.get(
+                "QMT_BRIDGE_PAPER_TRADING_DATA_DIR", ""
             ),
+            paper_trading_config_path=os.environ.get(
+                "QMT_BRIDGE_PAPER_TRADING_CONFIG_PATH", ""
+            ),
+            # 通知相关配置
+            notify_enabled=os.environ.get("QMT_BRIDGE_NOTIFY_ENABLED", "").lower()
+            in ("1", "true", "yes"),
+            notify_backends=os.environ.get("QMT_BRIDGE_NOTIFY_BACKENDS", ""),
+            notify_event_types=os.environ.get("QMT_BRIDGE_NOTIFY_EVENT_TYPES", ""),
             notify_ignore_event_types=os.environ.get(
                 "QMT_BRIDGE_NOTIFY_IGNORE_EVENT_TYPES", ""
             ),
-            feishu_webhook_url=os.environ.get(
-                "QMT_BRIDGE_FEISHU_WEBHOOK_URL", ""
-            ),
+            feishu_webhook_url=os.environ.get("QMT_BRIDGE_FEISHU_WEBHOOK_URL", ""),
             feishu_webhook_secret=os.environ.get(
                 "QMT_BRIDGE_FEISHU_WEBHOOK_SECRET", ""
             ),

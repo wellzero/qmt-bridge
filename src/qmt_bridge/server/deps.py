@@ -14,9 +14,7 @@
         ...
 """
 
-from fastapi import Depends, HTTPException, Request, status
-
-from .config import Settings, get_settings
+from fastapi import HTTPException, Request, status
 
 
 def get_trader_manager(request: Request):
@@ -42,5 +40,32 @@ def get_trader_manager(request: Request):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Trading module is not enabled",
+        )
+    return manager
+
+
+def get_paper_trader_manager(request: Request):
+    """从 app.state 获取 PaperTraderManager 模拟交易管理器实例。
+
+    PaperTraderManager 在应用启动阶段（_lifespan）初始化并存储到 app.state 中，
+    它封装了 PaperQuantTrader 的账户配置、模拟下单、撤单、查询等功能。
+
+    该依赖函数用于模拟交易相关路由，确保模拟交易模块已启用且初始化正常。
+    若模拟交易模块未启用（paper_trader_manager 为 None），则返回 503 错误。
+
+    Args:
+        request: FastAPI 请求对象，用于访问 app.state。
+
+    Returns:
+        PaperTraderManager 实例。
+
+    Raises:
+        HTTPException: 503 状态码 —— 模拟交易模块未启用或初始化失败。
+    """
+    manager = getattr(request.app.state, "paper_trader_manager", None)
+    if manager is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Paper trading module is not enabled",
         )
     return manager

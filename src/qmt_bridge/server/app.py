@@ -71,6 +71,25 @@ async def _lifespan(app: FastAPI):
     else:
         app.state.trader_manager = None
 
+    # 如果配置中启用了模拟交易模块，则初始化 PaperTraderManager
+    if settings.paper_trading_enabled:
+        try:
+            from .paper_trading import PaperTraderManager
+
+            paper_manager = PaperTraderManager(
+                data_dir=settings.paper_trading_data_dir or None,
+                config_path=settings.paper_trading_config_path or None,
+                default_account_id=settings.trading_account_id,
+            )
+            paper_manager.connect()
+            app.state.paper_trader_manager = paper_manager
+            logger.info("Paper trading module initialized")
+        except Exception:
+            logger.exception("Failed to initialize paper trading module")
+            app.state.paper_trader_manager = None
+    else:
+        app.state.paper_trader_manager = None
+
     # 初始化通知模块（独立于交易模块，可单独启用）
     if settings.notify_enabled:
         try:
@@ -112,6 +131,15 @@ async def _lifespan(app: FastAPI):
             logger.info("Trading module disconnected")
         except Exception:
             logger.exception("Error disconnecting trading module")
+
+    # 断开模拟交易管理器连接
+    paper_manager = getattr(app.state, "paper_trader_manager", None)
+    if paper_manager is not None:
+        try:
+            paper_manager.disconnect()
+            logger.info("Paper trading module disconnected")
+        except Exception:
+            logger.exception("Error disconnecting paper trading module")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -222,5 +250,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         from .ws import trade_callback
 
         app.include_router(trade_callback.router)
+
+    # ------------------------------------------------------------------
+    # 注册模拟交易路由（仅在配置中启用模拟交易时加载）
+    # ------------------------------------------------------------------
+    if settings.paper_trading_enabled:
+        from .paper_trading import router as paper_trading_router
+
+        app.include_router(paper_trading_router)
 
     return app

@@ -29,14 +29,15 @@ def main():
     4. 创建 FastAPI 应用并通过 Uvicorn 启动 HTTP 服务
 
     命令行参数说明：
-        --host:           监听地址，默认 0.0.0.0（所有网卡）
-        --port:           监听端口，默认 8000
-        --log-level:      日志级别（critical/error/warning/info/debug）
-        --workers:        工作进程数，Windows 下建议保持 1
-        --trading:        启用交易模块（需要 miniQMT 客户端运行）
-        --api-key:        API 密钥，用于保护交易等敏感接口
-        --mini-qmt-path:  miniQMT 安装目录路径（启用交易时必须指定）
-        --account-id:     交易资金账号
+        --host:                  监听地址，默认 0.0.0.0（所有网卡）
+        --port:                  监听端口，默认 8000
+        --log-level:             日志级别（critical/error/warning/info/debug）
+        --workers:               工作进程数，Windows 下建议保持 1
+        --trading:               启用交易模块（需要 miniQMT 客户端运行）
+        --paper-trading:         启用模拟交易模块
+        --api-key:               API 密钥，用于保护交易等敏感接口
+        --mini-qmt-path:         miniQMT 安装目录路径（启用交易时必须指定）
+        --account-id:            交易资金账号
     """
     # 优先从 .env 文件加载环境变量，使得后续参数默认值可以读取到 .env 中的配置
     _load_env_file()
@@ -76,6 +77,13 @@ def main():
         help="Enable trading module",
     )
     parser.add_argument(
+        "--paper-trading",
+        action="store_true",
+        default=os.environ.get("QMT_BRIDGE_PAPER_TRADING_ENABLED", "").lower()
+        in ("1", "true", "yes"),
+        help="Enable paper trading module",
+    )
+    parser.add_argument(
         "--api-key",
         default=os.environ.get("QMT_BRIDGE_API_KEY", ""),
         help="API key for authenticated endpoints",
@@ -101,6 +109,7 @@ def main():
         workers=args.workers,
         api_key=args.api_key,
         trading_enabled=args.trading,
+        paper_trading_enabled=getattr(args, "paper_trading", False),
         mini_qmt_path=args.mini_qmt_path,
         trading_account_id=args.account_id,
     )
@@ -115,7 +124,9 @@ def main():
     app_logger.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
     if not app_logger.handlers:
         handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s:     %(name)s - %(message)s"))
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(levelname)s:     %(name)s - %(message)s")
+        )
         app_logger.addHandler(handler)
 
     import uvicorn
@@ -168,7 +179,9 @@ def scheduler_main():
     app_logger.setLevel(getattr(logging, args.log_level.upper(), logging.INFO))
     if not app_logger.handlers:
         handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s:     %(name)s - %(message)s"))
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(levelname)s:     %(name)s - %(message)s")
+        )
         app_logger.addHandler(handler)
 
     settings = Settings.from_env()

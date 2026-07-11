@@ -24,6 +24,7 @@ QMT Bridge 解决这个问题：Windows 电脑作为数据中转站，运行 QMT
 - **100+ REST API 端点** — 历史 K 线、实时行情、L2 逐笔、板块管理、财务数据、指数权重、期权链、可转债、ETF、港股通、期货主力合约等
 - **5 个 WebSocket 端点** — 实时行情推送、全市场行情、L2 千档、下载进度、交易回报
 - **程序化交易** (可选) — 下单、撤单、批量委托、融资融券、银证转账、智能交易
+- **模拟交易** (可选) — 不依赖 QMT 客户端的本地 Paper Trading，支持多账户、CSV 委托记录与业绩汇总
 - **零依赖客户端** — Python 客户端基于 stdlib，无需安装 xtquant 即可在任意平台使用
 - **API Key 认证** — 可选的 API Key 保护，交易端点强制认证
 - **自动预下载** — 服务启动时自动下载板块、日历、指数权重等基础数据，之后每日定时刷新，客户端无需手动触发
@@ -88,6 +89,9 @@ qmt-server --port 8080 --log-level debug
 
 # 启用交易模块
 qmt-server --trading --api-key your-secret-key --mini-qmt-path "C:\国金QMT交易端\userdata_mini" --account-id 12345678
+
+# 启用模拟交易模块（无需 QMT 客户端）
+qmt-server --paper-trading --api-key your-secret-key --account-id 12345678
 ```
 
 也可以使用脚本：
@@ -134,6 +138,9 @@ curl http://<Windows局域网IP>:8000/api/meta/health
 | `QMT_BRIDGE_TRADING_ENABLED` | `--trading` | `false` | 是否启用交易模块 |
 | `QMT_BRIDGE_MINI_QMT_PATH` | `--mini-qmt-path` | _(空)_ | miniQMT 安装路径（交易模块需要） |
 | `QMT_BRIDGE_TRADING_ACCOUNT_ID` | `--account-id` | _(空)_ | 交易账户 ID |
+| `QMT_BRIDGE_PAPER_TRADING_ENABLED` | `--paper-trading` | `false` | 是否启用模拟交易模块 |
+| `QMT_BRIDGE_PAPER_TRADING_DATA_DIR` | — | _(空)_ | 模拟交易数据目录 |
+| `QMT_BRIDGE_PAPER_TRADING_CONFIG_PATH` | — | _(空)_ | 模拟交易配置文件路径（可选） |
 
 ## Auto Pre-download（自动预下载）
 
@@ -301,6 +308,28 @@ curl http://<Windows局域网IP>:8000/api/meta/health
 | GET | `/api/trading/positions` | 查询持仓 |
 | GET | `/api/trading/asset` | 查询资产 |
 | GET | `/api/trading/order_detail` | 查询单笔委托 |
+
+### Paper Trading — 模拟交易 `/api/paper_trading/*` (需要 API Key)
+
+模拟交易端点与真实交易端点形态一致，底层不连接 QMT 客户端，
+资金、持仓、委托按账户隔离，每笔委托自动写入 CSV，支持按账户汇总业绩。
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/paper_accounts` | 创建/更新账户配置（初始资金、费率、滑点等） |
+| GET | `/api/paper_accounts` | 列出所有模拟账户配置 |
+| GET | `/api/paper_accounts/{id}` | 查询单个账户配置 |
+| DELETE | `/api/paper_accounts/{id}` | 删除账户及数据 |
+| POST | `/api/paper_accounts/{id}/reset` | 重置账户 |
+| POST | `/api/paper_trading/order` | 模拟下单 |
+| POST | `/api/paper_trading/cancel` | 模拟撤单 |
+| POST | `/api/paper_trading/batch_order` | 模拟批量下单 |
+| GET | `/api/paper_trading/orders` | 查询模拟委托 |
+| GET | `/api/paper_trading/trades` | 查询模拟成交 |
+| GET | `/api/paper_trading/positions` | 查询模拟持仓 |
+| GET | `/api/paper_trading/asset` | 查询模拟资产 |
+| GET | `/api/paper_trading/summary` | 查询账户业绩摘要 |
+| GET | `/api/paper_trading/summaries` | 查询所有账户业绩摘要 |
 
 ### Credit — 融资融券 `/api/credit/*` (需要 API Key)
 
