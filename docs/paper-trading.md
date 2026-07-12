@@ -68,13 +68,14 @@ qmt-server --trading --paper-trading --api-key your-secret-key \
                                          └──────────────────────┘
        │                     │                      │
        ▼                     ▼                      ▼
-┌──────────────┐   ┌─────────────────┐   ┌──────────────────────┐
-│ AccountState │   │ orders_<id>     │   │ summary_<id>.json    │
-│ - cash       │   │ .csv            │   │ - total_asset        │
-│ - positions  │   │ (委托流水)       │   │ - total_pnl          │
-│ - orders     │   └─────────────────┘   │ - realized_pnl       │
-│ - trades     │                         │ - unrealized_pnl     │
-└──────────────┘                         └──────────────────────┘
+┌──────────────┐   ┌───────────────────────────┐   ┌──────────────────────┐
+│ AccountState │   │ {account_id}/order/       │   │ {account_id}/summary/│
+│ - cash       │   │ orders_{YYYYMMDD}.csv     │   │ summary.json         │
+│ - positions  │   │ (委托流水)                 │   │ - total_asset        │
+│ - orders     │   └───────────────────────────┘   │ - total_pnl          │
+│ - trades     │                                   │ - realized_pnl       │
+└──────────────┘                                   │ - unrealized_pnl     │
+                                                   └──────────────────────┘
 ```
 
 ## 模块职责
@@ -342,7 +343,7 @@ sequenceDiagram
 
 ### 委托 CSV
 
-路径：`{data_dir}/paper_trading/orders/orders_{account_id}_{YYYYMMDD}.csv`
+路径：`{data_dir}/paper_trading/{account_id}/order/orders_{YYYYMMDD}.csv`
 
 表头：
 
@@ -352,7 +353,7 @@ order_time,order_id,stock_code,order_type,order_volume,price_type,price,traded_v
 
 ### 业绩摘要 JSON
 
-路径：`{data_dir}/paper_trading/summary/summary_{account_id}.json`
+路径：`{data_dir}/paper_trading/{account_id}/summary/summary.json`
 
 字段：
 

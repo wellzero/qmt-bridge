@@ -17,6 +17,7 @@ from qmt_bridge.server.paper_trading.engine import (
     StaticPriceSource,
 )
 from qmt_bridge.server.paper_trading.papertrader import PaperAccount
+from qmt_bridge.server.paper_trading.storage import AccountSummary, PaperTradingStorage
 
 
 @pytest.fixture
@@ -411,6 +412,49 @@ def test_manager_download_prices_with_mock(temp_data_dir: Path):
     assert updated_config.static_prices["000001.SZ"] == pytest.approx(12.34)
 
     manager.disconnect()
+
+
+def test_storage_folder_structure(temp_data_dir: Path):
+    """账户数据按 {account_id}/order/ 与 {account_id}/summary/ 分层存储。"""
+    storage = PaperTradingStorage(data_dir=temp_data_dir)
+    storage.append_order(
+        "acc_folder",
+        {
+            "order_time": "10:00:00",
+            "order_id": 1,
+            "stock_code": "000001.SZ",
+            "order_type": 23,
+            "order_volume": 100,
+            "price_type": 11,
+            "price": 10.0,
+            "traded_volume": 100,
+            "traded_price": 10.0,
+            "order_status": 50,
+            "status_msg": "已成",
+            "strategy_name": "test",
+            "order_remark": "",
+        },
+    )
+    summary = AccountSummary(
+        account_id="acc_folder", cash=90000.0, total_asset=100000.0
+    )
+    storage.write_summary(summary)
+
+    orders_path = storage.orders_path("acc_folder")
+    summary_path = storage.summary_path("acc_folder")
+
+    assert orders_path.relative_to(temp_data_dir).parts[:3] == (
+        "paper_trading",
+        "acc_folder",
+        "order",
+    )
+    assert summary_path.relative_to(temp_data_dir).parts[:3] == (
+        "paper_trading",
+        "acc_folder",
+        "summary",
+    )
+    assert orders_path.name.startswith("orders_")
+    assert summary_path.name == "summary.json"
 
 
 def datetime_now_str() -> str:
