@@ -59,9 +59,7 @@ class SectorMixin:
         resp = self._get("/api/sector_stocks", {"sector": sector})
         return resp.get("stocks", [])
 
-    def get_sector_stocks_v2(
-        self, sector: str, real_timetag: int = -1
-    ) -> list[str]:
+    def get_sector_stocks_v2(self, sector: str, real_timetag: int = -1) -> list[str]:
         """获取板块成分股列表（支持历史成分查询）。
 
         底层调用 ``xtdata.get_stock_list_in_sector(sector_name, real_timetag)``，
@@ -75,10 +73,13 @@ class SectorMixin:
         Returns:
             成分股代码列表
         """
-        resp = self._get("/api/sector/stocks", {
-            "sector": sector,
-            "real_timetag": real_timetag,
-        })
+        resp = self._get(
+            "/api/sector/stocks",
+            {
+                "sector": sector,
+                "real_timetag": real_timetag,
+            },
+        )
         return resp.get("stocks", [])
 
     # ------------------------------------------------------------------
@@ -112,10 +113,13 @@ class SectorMixin:
         Returns:
             操作结果
         """
-        return self._post("/api/sector/create", {
-            "sector_name": sector_name,
-            "parent_node": parent_node,
-        })
+        return self._post(
+            "/api/sector/create",
+            {
+                "sector_name": sector_name,
+                "parent_node": parent_node,
+            },
+        )
 
     def add_sector_stocks(self, sector_name: str, stocks: list[str]) -> dict:
         """向板块添加成分股。
@@ -129,10 +133,13 @@ class SectorMixin:
         Returns:
             操作结果
         """
-        return self._post("/api/sector/add_stocks", {
-            "sector_name": sector_name,
-            "stocks": stocks,
-        })
+        return self._post(
+            "/api/sector/add_stocks",
+            {
+                "sector_name": sector_name,
+                "stocks": stocks,
+            },
+        )
 
     def remove_sector_stocks(self, sector_name: str, stocks: list[str]) -> dict:
         """从板块移除成分股。
@@ -147,10 +154,13 @@ class SectorMixin:
         Returns:
             操作结果
         """
-        return self._post("/api/sector/remove_stocks", {
-            "sector_name": sector_name,
-            "stocks": stocks,
-        })
+        return self._post(
+            "/api/sector/remove_stocks",
+            {
+                "sector_name": sector_name,
+                "stocks": stocks,
+            },
+        )
 
     def remove_sector(self, sector_name: str) -> dict:
         """删除整个板块。
@@ -179,7 +189,10 @@ class SectorMixin:
         Returns:
             操作结果
         """
-        return self._post("/api/sector/reset", {
-            "sector_name": sector_name,
-            "stocks": stocks,
-        })
+        return self._post(
+            "/api/sector/reset",
+            {
+                "sector_name": sector_name,
+                "stocks": stocks,
+            },
+        )

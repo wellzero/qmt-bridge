@@ -39,7 +39,9 @@ def get_tabular_data(
     """
     # 将逗号分隔的代码字符串解析为列表，为空则传空列表
     stock_list = [s.strip() for s in stocks.split(",") if s.strip()] if stocks else []
-    raw = xtdata.get_financial_data(stock_list, table_list=[table_name], start_time=start_time, end_time=end_time)
+    raw = xtdata.get_financial_data(
+        stock_list, table_list=[table_name], start_time=start_time, end_time=end_time
+    )
     return {"table": table_name, "data": _numpy_to_python(raw)}
 
 
@@ -69,5 +71,7 @@ def get_tabular_formula(
 ):
     """按表名查询公式表格数据 → xtdata.get_tabular_formula()"""
     stock_list = [s.strip() for s in stocks.split(",") if s.strip()] if stocks else []
-    raw = xtdata.get_tabular_formula(stock_list, table_name=table_name, start_time=start_time, end_time=end_time)
+    raw = xtdata.get_tabular_formula(
+        stock_list, table_name=table_name, start_time=start_time, end_time=end_time
+    )
     return {"table": table_name, "data": _numpy_to_python(raw)}

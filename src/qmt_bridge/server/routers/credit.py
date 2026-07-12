@@ -13,11 +13,13 @@
 from fastapi import APIRouter, Depends, Query
 
 from ..deps import get_trader_manager
-from ..helpers import _numpy_to_python, ok_response
+from ..helpers import _numpy_to_python
 from ..models import CreditOrderRequest
 from ..security import require_api_key
 
-router = APIRouter(prefix="/api/credit", tags=["credit"], dependencies=[Depends(require_api_key)])
+router = APIRouter(
+    prefix="/api/credit", tags=["credit"], dependencies=[Depends(require_api_key)]
+)
 
 
 @router.post("/order")

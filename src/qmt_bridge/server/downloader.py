@@ -36,7 +36,12 @@ logger = logging.getLogger("qmt_bridge")
 
 # 逐只下载，单只股票的固定超时（秒）。
 STOCK_TIMEOUT: dict[str, int] = {
-    "1m": 10, "5m": 10, "15m": 10, "30m": 5, "60m": 5, "1d": 5,
+    "1m": 10,
+    "5m": 10,
+    "15m": 10,
+    "30m": 5,
+    "60m": 5,
+    "1d": 5,
 }
 
 # 财务数据 future 轮询间隔（秒）
@@ -53,7 +58,11 @@ SAFETY_OVERLAP_DAYS = 1
 # 0 = 跳过检查（不会因"缺历史"触发全量重下）。
 KLINE_HISTORY_CHECK_YEARS: dict[str, int] = {
     "1d": 3,
-    "1m": 0, "5m": 0, "15m": 0, "30m": 0, "60m": 0,
+    "1m": 0,
+    "5m": 0,
+    "15m": 0,
+    "30m": 0,
+    "60m": 0,
 }
 
 # 财务数据过期天数（季报周期约 90 天）
@@ -68,9 +77,11 @@ DEFAULT_SECTORS = "沪深A股,沪深ETF,沪深指数"
 
 # ── 结果数据类 ────────────────────────────────────────────────
 
+
 @dataclass
 class KlineDownloadResult:
     """单次 K 线下载的统计结果。"""
+
     ok: int = 0
     fail: int = 0
     timeout: int = 0
@@ -80,6 +91,7 @@ class KlineDownloadResult:
 @dataclass
 class IncrementalResult:
     """增量下载编排的统计结果。"""
+
     period: str = ""
     ok: int = 0
     fail: int = 0
@@ -89,6 +101,7 @@ class IncrementalResult:
 
 
 # ── 调度器状态管理 ────────────────────────────────────────────
+
 
 class DownloadSchedulerState:
     """防止任务重叠 + 暴露状态给 API。"""
@@ -121,6 +134,7 @@ class DownloadSchedulerState:
 
 
 # ── 工具函数 ──────────────────────────────────────────────────
+
 
 def make_batches(lst: list, size: int) -> list[list]:
     """将列表按 size 切分为子列表。"""
@@ -170,6 +184,7 @@ def get_stock_list(sectors: str = DEFAULT_SECTORS) -> list[str]:
 
 # ── 核心下载函数 ──────────────────────────────────────────────
 
+
 def download_single_kline(
     client,
     code: str,
@@ -218,7 +233,12 @@ def download_single_kline(
         return status["done"]
 
     result = client.supply_history_data2(
-        [code], period, start_time, end_time, bson_param, on_progress,
+        [code],
+        period,
+        start_time,
+        end_time,
+        bson_param,
+        on_progress,
     )
 
     if result:
@@ -231,9 +251,11 @@ def download_single_kline(
                 return "disconnected"
             try:
                 check = xtdata.get_local_data(
-                    field_list=[], stock_list=[code],
+                    field_list=[],
+                    stock_list=[code],
                     period=period,
-                    start_time=start_time, end_time=end_time,
+                    start_time=start_time,
+                    end_time=end_time,
                     count=1,
                 )
                 if code in check and check[code] is not None and not check[code].empty:
@@ -258,6 +280,7 @@ def download_single_kline(
 
 
 # ── 批量下载 (替代 xtdata.download_history_data2) ────────────
+
 
 def download_history_data2_safe(
     stock_list: list[str],
@@ -286,7 +309,12 @@ def download_history_data2_safe(
     for i, code in enumerate(stock_list):
         try:
             status = download_single_kline(
-                client, code, period, start_time, end_time, timeout=timeout,
+                client,
+                code,
+                period,
+                start_time,
+                end_time,
+                timeout=timeout,
             )
         except Exception as exc:
             status = f"error: {exc}"
@@ -297,17 +325,20 @@ def download_history_data2_safe(
             logger.warning("K线下载 %s %s: %s", period, code, status)
 
         if callback is not None:
-            callback({
-                "finished": i + 1,
-                "total": total,
-                "stock": code,
-                "status": status,
-            })
+            callback(
+                {
+                    "finished": i + 1,
+                    "total": total,
+                    "stock": code,
+                    "status": status,
+                }
+            )
 
     return results
 
 
 # ── 缓存探测 ─────────────────────────────────────────────────
+
 
 def probe_local_dates(stocks: list[str], period: str) -> dict[str, str]:
     """批量探测每只股票本地缓存的最新数据日期。
@@ -320,8 +351,12 @@ def probe_local_dates(stocks: list[str], period: str) -> dict[str, str]:
         batch = stocks[i : i + PROBE_BATCH_SIZE]
         try:
             data = xtdata.get_local_data(
-                field_list=[], stock_list=batch,
-                period=period, start_time="", end_time="", count=1,
+                field_list=[],
+                stock_list=batch,
+                period=period,
+                start_time="",
+                end_time="",
+                count=1,
             )
             for stock, df in data.items():
                 if df is not None and not df.empty:
@@ -337,7 +372,8 @@ def probe_local_dates(stocks: list[str], period: str) -> dict[str, str]:
 
 
 def probe_financial_cache(
-    stocks: list[str], table_list: list[str],
+    stocks: list[str],
+    table_list: list[str],
 ) -> tuple[set[str], int, int]:
     """探测哪些股票已有完整且新鲜的本地财务数据缓存。
 
@@ -348,7 +384,9 @@ def probe_financial_cache(
     stale_count = 0
     incomplete_count = 0
     check_table = table_list[0]
-    stale_cutoff = (datetime.now() - timedelta(days=FINANCIAL_STALE_DAYS)).strftime("%Y%m%d")
+    stale_cutoff = (datetime.now() - timedelta(days=FINANCIAL_STALE_DAYS)).strftime(
+        "%Y%m%d"
+    )
 
     for batch in make_batches(stocks, PROBE_BATCH_SIZE):
         try:
@@ -392,7 +430,9 @@ def group_stocks_by_date(
     for stock in stocks:
         last_date = local_dates.get(stock)
         if last_date:
-            overlap_dt = datetime.strptime(last_date, "%Y%m%d") - timedelta(days=SAFETY_OVERLAP_DAYS)
+            overlap_dt = datetime.strptime(last_date, "%Y%m%d") - timedelta(
+                days=SAFETY_OVERLAP_DAYS
+            )
             groups[overlap_dt.strftime("%Y%m%d")].append(stock)
         else:
             groups[""].append(stock)
@@ -400,6 +440,7 @@ def group_stocks_by_date(
 
 
 # ── K 线批量下载（无 tqdm） ──────────────────────────────────
+
 
 def _run_kline_downloads(
     client,
@@ -417,8 +458,13 @@ def _run_kline_downloads(
         code = stocks[idx]
         try:
             status = download_single_kline(
-                client, code, period, start_time, end_time,
-                incrementally, timeout,
+                client,
+                code,
+                period,
+                start_time,
+                end_time,
+                incrementally,
+                timeout,
             )
             if status == "ok":
                 res.ok += 1
@@ -444,6 +490,7 @@ def _run_kline_downloads(
 
 
 # ── 增量下载编排（调度器用） ──────────────────────────────────
+
 
 def download_kline_incremental(
     stocks: list[str],
@@ -475,9 +522,12 @@ def download_kline_incremental(
         for batch in make_batches(stocks_with_cache, PROBE_BATCH_SIZE):
             try:
                 data = xtdata.get_local_data(
-                    field_list=[], stock_list=batch, period=period,
+                    field_list=[],
+                    stock_list=batch,
+                    period=period,
                     start_time=f"{sentinel_year}0101",
-                    end_time=f"{sentinel_year}1231", count=1,
+                    end_time=f"{sentinel_year}1231",
+                    count=1,
                 )
                 for stock, df in data.items():
                     if df is not None and not df.empty:
@@ -493,14 +543,18 @@ def download_kline_incremental(
         if s in incomplete_stocks:
             return 999998
         d = local_dates[s]
-        return (datetime.strptime(today_str, "%Y%m%d") - datetime.strptime(d, "%Y%m%d")).days
+        return (
+            datetime.strptime(today_str, "%Y%m%d") - datetime.strptime(d, "%Y%m%d")
+        ).days
 
     sorted_stocks = sorted(stocks, key=_gap_sort_key, reverse=True)
     date_groups: list[tuple[str, str, list[str]]] = []
     for s in sorted_stocks:
         d = local_dates.get(s)
         if d and s not in incomplete_stocks:
-            overlap_dt = datetime.strptime(d, "%Y%m%d") - timedelta(days=SAFETY_OVERLAP_DAYS)
+            overlap_dt = datetime.strptime(d, "%Y%m%d") - timedelta(
+                days=SAFETY_OVERLAP_DAYS
+            )
             st = overlap_dt.strftime("%Y%m%d")
         else:
             st = ""
@@ -511,7 +565,10 @@ def download_kline_incremental(
     n_ok = len(sorted_stocks) - n_no_cache - n_incomplete
     logger.info(
         "K线 %s 缓存探测: 无缓存 %d, 历史不完整 %d, 正常增量 %d",
-        period, n_no_cache, n_incomplete, n_ok,
+        period,
+        n_no_cache,
+        n_incomplete,
+        n_ok,
     )
 
     # 按组逐只下载
@@ -522,8 +579,14 @@ def download_kline_incremental(
     for start_time, end_time, group_stocks in date_groups:
         all_indices = list(range(len(group_stocks)))
         res = _run_kline_downloads(
-            client, group_stocks, all_indices, period, start_time, end_time,
-            incrementally, effective_timeout,
+            client,
+            group_stocks,
+            all_indices,
+            period,
+            start_time,
+            end_time,
+            incrementally,
+            effective_timeout,
         )
 
         # 自动重试
@@ -532,11 +595,23 @@ def download_kline_incremental(
         for retry_round in range(1, max_retries + 1):
             if not failed:
                 break
-            retry_timeout = int(effective_timeout * (1.5 ** retry_round))
-            logger.info("K线 %s 重试第 %d 轮: %d 只, 超时 %ds", period, retry_round, len(failed), retry_timeout)
+            retry_timeout = int(effective_timeout * (1.5**retry_round))
+            logger.info(
+                "K线 %s 重试第 %d 轮: %d 只, 超时 %ds",
+                period,
+                retry_round,
+                len(failed),
+                retry_timeout,
+            )
             r = _run_kline_downloads(
-                client, group_stocks, failed, period, start_time, end_time,
-                incrementally, retry_timeout,
+                client,
+                group_stocks,
+                failed,
+                period,
+                start_time,
+                end_time,
+                incrementally,
+                retry_timeout,
             )
             ok += r.ok
             failed = r.failed_indices
@@ -550,11 +625,19 @@ def download_kline_incremental(
     elapsed = time.time() - t0
     logger.info(
         "K线 %s 增量下载完成: 成功 %d, 失败 %d, 耗时 %.1f秒, 日期组 %d",
-        period, total_ok, total_fail, elapsed, len(date_groups),
+        period,
+        total_ok,
+        total_fail,
+        elapsed,
+        len(date_groups),
     )
     return IncrementalResult(
-        period=period, ok=total_ok, fail=total_fail,
-        timeout=total_to, date_groups=len(date_groups), elapsed=elapsed,
+        period=period,
+        ok=total_ok,
+        fail=total_fail,
+        timeout=total_to,
+        date_groups=len(date_groups),
+        elapsed=elapsed,
     )
 
 
@@ -586,7 +669,10 @@ def download_financial_incremental(
     n_no_data = len(need_download) - n_stale - n_incomplete
     logger.info(
         "财务缓存探测: 新鲜 %d, 过期 %d, 不完整 %d, 无缓存 %d",
-        n_fresh, n_stale, n_incomplete, n_no_data,
+        n_fresh,
+        n_stale,
+        n_incomplete,
+        n_no_data,
     )
 
     if not need_download:
@@ -600,20 +686,29 @@ def download_financial_incremental(
     logger.info("开始下载财务数据: %d 批 (%d 只)", len(batches), len(stocks))
 
     # 首轮下载
-    ok, fail, to, failed = _run_financial_batches(batches, all_indices, table_list, timeout, delay)
+    ok, fail, to, failed = _run_financial_batches(
+        batches, all_indices, table_list, timeout, delay
+    )
 
     # 自动重试
     for retry_round in range(1, max_retries + 1):
         if not failed:
             break
-        retry_timeout = int(timeout * (1.5 ** retry_round))
+        retry_timeout = int(timeout * (1.5**retry_round))
         retry_stocks = sum(len(batches[i]) for i in failed)
         logger.info(
             "财务数据重试第 %d 轮: %d 批 (%d 只), 超时 %ds",
-            retry_round, len(failed), retry_stocks, retry_timeout,
+            retry_round,
+            len(failed),
+            retry_stocks,
+            retry_timeout,
         )
         r_ok, r_fail, r_to, still_failed = _run_financial_batches(
-            batches, failed, table_list, retry_timeout, delay,
+            batches,
+            failed,
+            table_list,
+            retry_timeout,
+            delay,
         )
         ok += r_ok
         failed = still_failed
@@ -624,7 +719,9 @@ def download_financial_incremental(
     fail = final_fail_stocks
     to = len(failed)
 
-    logger.info("财务数据完成: 成功 %d (缓存 %d), 失败 %d (超时 %d)", ok, n_cached, fail, to)
+    logger.info(
+        "财务数据完成: 成功 %d (缓存 %d), 失败 %d (超时 %d)", ok, n_cached, fail, to
+    )
     return {"ok": ok, "fail": fail, "timeout": to}
 
 
@@ -665,7 +762,9 @@ def _run_financial_batches(
             timeout_count += 1
             fail_count += len(batch)
             failed_indices.append(idx)
-            logger.error("财务数据批次 %d 超时 (%d秒, %d 只)", idx + 1, timeout, len(batch))
+            logger.error(
+                "财务数据批次 %d 超时 (%d秒, %d 只)", idx + 1, timeout, len(batch)
+            )
         except Exception as exc:
             cancelled[0] = True
             fail_count += len(batch)

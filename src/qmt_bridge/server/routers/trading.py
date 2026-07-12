@@ -19,7 +19,9 @@ from ..models import (
 )
 from ..security import require_api_key
 
-router = APIRouter(prefix="/api/trading", tags=["trading"], dependencies=[Depends(require_api_key)])
+router = APIRouter(
+    prefix="/api/trading", tags=["trading"], dependencies=[Depends(require_api_key)]
+)
 
 
 @router.post("/order")
@@ -49,7 +51,9 @@ def cancel_order(req: CancelRequest, manager=Depends(get_trader_manager)):
 
 
 @router.post("/cancel_by_sysid")
-def cancel_order_by_sysid(req: CancelBySysidRequest, manager=Depends(get_trader_manager)):
+def cancel_order_by_sysid(
+    req: CancelBySysidRequest, manager=Depends(get_trader_manager)
+):
     """按系统编号同步撤单 → manager.cancel_order_stock_sysid()"""
     result = manager.cancel_order_stock_sysid(
         market=req.market,
@@ -60,7 +64,9 @@ def cancel_order_by_sysid(req: CancelBySysidRequest, manager=Depends(get_trader_
 
 
 @router.post("/cancel_by_sysid_async")
-def cancel_order_by_sysid_async(req: CancelBySysidRequest, manager=Depends(get_trader_manager)):
+def cancel_order_by_sysid_async(
+    req: CancelBySysidRequest, manager=Depends(get_trader_manager)
+):
     """按系统编号异步撤单 → manager.cancel_order_stock_sysid_async()"""
     result = manager.cancel_order_stock_sysid_async(
         market=req.market,
@@ -77,7 +83,9 @@ def query_orders(
     manager=Depends(get_trader_manager),
 ):
     """查询当日委托列表 → manager.query_orders()"""
-    result = manager.query_orders(account_id=account_id, cancelable_only=cancelable_only)
+    result = manager.query_orders(
+        account_id=account_id, cancelable_only=cancelable_only
+    )
     return {"data": _numpy_to_python(result)}
 
 
@@ -142,7 +150,9 @@ def batch_order(orders: list[OrderRequest], manager=Depends(get_trader_manager))
 
 
 @router.post("/batch_cancel")
-def batch_cancel(cancel_requests: list[CancelRequest], manager=Depends(get_trader_manager)):
+def batch_cancel(
+    cancel_requests: list[CancelRequest], manager=Depends(get_trader_manager)
+):
     """批量撤单。"""
     results = []
     for req in cancel_requests:

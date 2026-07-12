@@ -64,12 +64,15 @@ class OptionMixin:
         Returns:
             期权合约代码列表
         """
-        resp = self._get("/api/option/list", {
-            "undl_code": undl_code,
-            "dedate": dedate,
-            "opttype": opttype,
-            "isavailable": isavailable,
-        })
+        resp = self._get(
+            "/api/option/list",
+            {
+                "undl_code": undl_code,
+                "dedate": dedate,
+                "opttype": opttype,
+                "isavailable": isavailable,
+            },
+        )
         return resp.get("data", [])
 
     def get_history_option_list(self, undl_code: str, dedate: str) -> list:
@@ -85,8 +88,11 @@ class OptionMixin:
         Returns:
             历史期权合约代码列表
         """
-        resp = self._get("/api/option/his_option_list", {
-            "undl_code": undl_code,
-            "dedate": dedate,
-        })
+        resp = self._get(
+            "/api/option/his_option_list",
+            {
+                "undl_code": undl_code,
+                "dedate": dedate,
+            },
+        )
         return resp.get("data", [])

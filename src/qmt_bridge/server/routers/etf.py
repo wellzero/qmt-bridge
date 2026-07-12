@@ -56,10 +56,12 @@ def get_etf_info(
     stocks_raw = raw.pop("stocks", {})
     components = []
     for code, info in stocks_raw.items():
-        components.append({
-            "stock_code": code,
-            "volume": info.get("componentVolume", 0),
-        })
+        components.append(
+            {
+                "stock_code": code,
+                "volume": info.get("componentVolume", 0),
+            }
+        )
 
     return {
         "stock": stock,

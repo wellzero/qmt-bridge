@@ -72,6 +72,7 @@ class BridgeTraderCallback:
             return
         # 将 WebSocket 广播协程提交到主事件循环
         from ..ws.trade_callback import broadcast_trade_event
+
         asyncio.run_coroutine_threadsafe(broadcast_trade_event(event), self._loop)
         # 将通知分发协程也提交到主事件循环
         if self._notifier is not None:
@@ -96,10 +97,12 @@ class BridgeTraderCallback:
             order: XtOrder 委托对象，包含委托详情。
         """
         logger.debug("on_stock_order: %s", _order_to_dict(order))
-        self._dispatch({
-            "type": "order",
-            "data": _order_to_dict(order),
-        })
+        self._dispatch(
+            {
+                "type": "order",
+                "data": _order_to_dict(order),
+            }
+        )
 
     def on_stock_trade(self, trade):
         """成交回报回调。
@@ -110,10 +113,12 @@ class BridgeTraderCallback:
             trade: XtTrade 成交对象，包含成交详情。
         """
         logger.debug("on_stock_trade: %s", _trade_to_dict(trade))
-        self._dispatch({
-            "type": "trade",
-            "data": _trade_to_dict(trade),
-        })
+        self._dispatch(
+            {
+                "type": "trade",
+                "data": _trade_to_dict(trade),
+            }
+        )
 
     def on_order_error(self, order_error):
         """委托错误回调。
@@ -124,10 +129,12 @@ class BridgeTraderCallback:
             order_error: 错误对象，包含错误代码和错误消息。
         """
         logger.warning("on_order_error: %s", _error_to_dict(order_error))
-        self._dispatch({
-            "type": "order_error",
-            "data": _error_to_dict(order_error),
-        })
+        self._dispatch(
+            {
+                "type": "order_error",
+                "data": _error_to_dict(order_error),
+            }
+        )
 
     def on_cancel_error(self, cancel_error):
         """撤单失败回调。
@@ -138,10 +145,12 @@ class BridgeTraderCallback:
             cancel_error: 错误对象，包含错误代码和错误消息。
         """
         logger.warning("on_cancel_error: %s", _error_to_dict(cancel_error))
-        self._dispatch({
-            "type": "cancel_error",
-            "data": _error_to_dict(cancel_error),
-        })
+        self._dispatch(
+            {
+                "type": "cancel_error",
+                "data": _error_to_dict(cancel_error),
+            }
+        )
 
     def on_order_stock_async_response(self, response):
         """异步下单响应回调。
@@ -151,11 +160,16 @@ class BridgeTraderCallback:
         Args:
             response: 响应对象，包含分配的委托编号。
         """
-        logger.debug("on_order_stock_async_response: %s", {"order_id": getattr(response, "order_id", None)})
-        self._dispatch({
-            "type": "async_response",
-            "data": {"order_id": getattr(response, "order_id", None)},
-        })
+        logger.debug(
+            "on_order_stock_async_response: %s",
+            {"order_id": getattr(response, "order_id", None)},
+        )
+        self._dispatch(
+            {
+                "type": "async_response",
+                "data": {"order_id": getattr(response, "order_id", None)},
+            }
+        )
 
     def on_account_status(self, status):
         """账户状态变化回调。
@@ -166,10 +180,12 @@ class BridgeTraderCallback:
             status: 账户状态对象。
         """
         logger.info("on_account_status: %s", str(status))
-        self._dispatch({
-            "type": "account_status",
-            "data": {"status": str(status)},
-        })
+        self._dispatch(
+            {
+                "type": "account_status",
+                "data": {"status": str(status)},
+            }
+        )
 
     def on_connected(self):
         """交易连接建立回调。"""
@@ -185,10 +201,12 @@ class BridgeTraderCallback:
             asset: XtAsset 资产对象，包含总资产、可用资金等。
         """
         logger.debug("on_stock_asset: %s", _asset_to_dict(asset))
-        self._dispatch({
-            "type": "asset",
-            "data": _asset_to_dict(asset),
-        })
+        self._dispatch(
+            {
+                "type": "asset",
+                "data": _asset_to_dict(asset),
+            }
+        )
 
     def on_stock_position(self, position):
         """持仓变动回调。
@@ -199,10 +217,12 @@ class BridgeTraderCallback:
             position: XtPosition 持仓对象，包含持仓量、可用量等。
         """
         logger.debug("on_stock_position: %s", _position_to_dict(position))
-        self._dispatch({
-            "type": "position",
-            "data": _position_to_dict(position),
-        })
+        self._dispatch(
+            {
+                "type": "position",
+                "data": _position_to_dict(position),
+            }
+        )
 
     def on_cancel_order_stock_async_response(self, response):
         """异步撤单响应回调。
@@ -212,17 +232,22 @@ class BridgeTraderCallback:
         Args:
             response: 响应对象，包含委托编号和撤单结果。
         """
-        logger.debug("on_cancel_order_stock_async_response: %s", {
-            "order_id": getattr(response, "order_id", None),
-            "cancel_result": getattr(response, "cancel_result", None),
-        })
-        self._dispatch({
-            "type": "async_cancel_response",
-            "data": {
+        logger.debug(
+            "on_cancel_order_stock_async_response: %s",
+            {
                 "order_id": getattr(response, "order_id", None),
                 "cancel_result": getattr(response, "cancel_result", None),
             },
-        })
+        )
+        self._dispatch(
+            {
+                "type": "async_cancel_response",
+                "data": {
+                    "order_id": getattr(response, "order_id", None),
+                    "cancel_result": getattr(response, "cancel_result", None),
+                },
+            }
+        )
 
     def on_smt_appointment_async_response(self, response):
         """SMT 约定式交易异步响应回调。
@@ -232,19 +257,24 @@ class BridgeTraderCallback:
         Args:
             response: 响应对象，包含委托编号、错误代码和错误消息。
         """
-        logger.debug("on_smt_appointment_async_response: %s", {
-            "order_id": getattr(response, "order_id", None),
-            "error_id": getattr(response, "error_id", None),
-            "error_msg": getattr(response, "error_msg", None),
-        })
-        self._dispatch({
-            "type": "smt_appointment_response",
-            "data": {
+        logger.debug(
+            "on_smt_appointment_async_response: %s",
+            {
                 "order_id": getattr(response, "order_id", None),
                 "error_id": getattr(response, "error_id", None),
                 "error_msg": getattr(response, "error_msg", None),
             },
-        })
+        )
+        self._dispatch(
+            {
+                "type": "smt_appointment_response",
+                "data": {
+                    "order_id": getattr(response, "order_id", None),
+                    "error_id": getattr(response, "error_id", None),
+                    "error_msg": getattr(response, "error_msg", None),
+                },
+            }
+        )
 
 
 # ------------------------------------------------------------------
@@ -262,10 +292,21 @@ def _order_to_dict(order) -> dict:
         包含委托关键字段的字典。
     """
     attrs = [
-        "account_id", "stock_code", "order_id", "order_sysid",
-        "order_time", "order_type", "order_volume", "price_type",
-        "price", "traded_volume", "traded_price", "order_status",
-        "status_msg", "strategy_name", "order_remark",
+        "account_id",
+        "stock_code",
+        "order_id",
+        "order_sysid",
+        "order_time",
+        "order_type",
+        "order_volume",
+        "price_type",
+        "price",
+        "traded_volume",
+        "traded_price",
+        "order_status",
+        "status_msg",
+        "strategy_name",
+        "order_remark",
     ]
     return {a: getattr(order, a, None) for a in attrs}
 
@@ -280,9 +321,17 @@ def _trade_to_dict(trade) -> dict:
         包含成交关键字段的字典。
     """
     attrs = [
-        "account_id", "stock_code", "order_id", "order_sysid",
-        "traded_id", "traded_time", "traded_volume", "traded_price",
-        "order_type", "strategy_name", "order_remark",
+        "account_id",
+        "stock_code",
+        "order_id",
+        "order_sysid",
+        "traded_id",
+        "traded_time",
+        "traded_volume",
+        "traded_price",
+        "order_type",
+        "strategy_name",
+        "order_remark",
     ]
     return {a: getattr(trade, a, None) for a in attrs}
 
@@ -297,7 +346,10 @@ def _error_to_dict(error) -> dict:
         包含错误关键字段的字典。
     """
     attrs = [
-        "account_id", "order_id", "error_id", "error_msg",
+        "account_id",
+        "order_id",
+        "error_id",
+        "error_msg",
     ]
     return {a: getattr(error, a, None) for a in attrs}
 
@@ -312,7 +364,10 @@ def _asset_to_dict(asset) -> dict:
         包含资产关键字段的字典。
     """
     attrs = [
-        "account_id", "cash", "frozen_cash", "market_value",
+        "account_id",
+        "cash",
+        "frozen_cash",
+        "market_value",
         "total_asset",
     ]
     return {a: getattr(asset, a, None) for a in attrs}
@@ -328,7 +383,12 @@ def _position_to_dict(position) -> dict:
         包含持仓关键字段的字典。
     """
     attrs = [
-        "account_id", "stock_code", "volume", "can_use_volume",
-        "frozen_volume", "open_price", "market_value",
+        "account_id",
+        "stock_code",
+        "volume",
+        "can_use_volume",
+        "frozen_volume",
+        "open_price",
+        "market_value",
     ]
     return {a: getattr(position, a, None) for a in attrs}

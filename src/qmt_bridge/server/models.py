@@ -13,8 +13,10 @@ from pydantic import BaseModel, Field
 # 数据下载模型
 # ---------------------------------------------------------------------------
 
+
 class DownloadRequest(BaseModel):
     """单只股票历史数据下载请求。"""
+
     stock: str
     period: str = "1d"
     start: str = ""
@@ -23,6 +25,7 @@ class DownloadRequest(BaseModel):
 
 class BatchDownloadRequest(BaseModel):
     """批量股票历史数据下载请求。"""
+
     stock_list: list[str] = Field(default=[], alias="stocks")
     period: str = "1d"
     start_time: str = ""
@@ -33,6 +36,7 @@ class BatchDownloadRequest(BaseModel):
 
 class FinancialDownloadRequest(BaseModel):
     """财务数据下载请求。"""
+
     stock_list: list[str] = Field(default=[], alias="stocks")
     table_list: list[str] = Field(default=[], alias="tables")
     start_time: str = ""
@@ -43,6 +47,7 @@ class FinancialDownloadRequest(BaseModel):
 
 class FinancialDownload2Request(BaseModel):
     """财务数据下载请求（第二版接口）。"""
+
     stock_list: list[str] = Field(default=[], alias="stocks")
     table_list: list[str] = Field(default=[], alias="tables")
 
@@ -51,6 +56,7 @@ class FinancialDownload2Request(BaseModel):
 
 class HisSTDataDownloadRequest(BaseModel):
     """历史 ST 数据下载请求。"""
+
     stock_list: list[str] = Field(default=[], alias="stocks")
     period: str = "1d"
     start_time: str = ""
@@ -61,6 +67,7 @@ class HisSTDataDownloadRequest(BaseModel):
 
 class TabularDataDownloadRequest(BaseModel):
     """表格数据下载请求。"""
+
     table_list: list[str] = Field(default=[], alias="tables")
 
     model_config = {"populate_by_name": True}
@@ -70,19 +77,23 @@ class TabularDataDownloadRequest(BaseModel):
 # 板块管理模型
 # ---------------------------------------------------------------------------
 
+
 class CreateSectorFolderRequest(BaseModel):
     """创建板块分类文件夹请求。"""
+
     folder_name: str
 
 
 class CreateSectorRequest(BaseModel):
     """创建自定义板块请求。"""
+
     sector_name: str
     parent_node: str = ""
 
 
 class AddSectorStocksRequest(BaseModel):
     """向板块添加成分股请求。"""
+
     sector_name: str
     stock_list: list[str] = Field(default=[], alias="stocks")
 
@@ -91,6 +102,7 @@ class AddSectorStocksRequest(BaseModel):
 
 class RemoveSectorStocksRequest(BaseModel):
     """从板块移除成分股请求。"""
+
     sector_name: str
     stock_list: list[str] = Field(default=[], alias="stocks")
 
@@ -99,6 +111,7 @@ class RemoveSectorStocksRequest(BaseModel):
 
 class ResetSectorRequest(BaseModel):
     """重置板块成分股请求。"""
+
     sector_name: str
     stock_list: list[str] = Field(default=[], alias="stocks")
 
@@ -109,8 +122,10 @@ class ResetSectorRequest(BaseModel):
 # 普通交易委托模型
 # ---------------------------------------------------------------------------
 
+
 class OrderRequest(BaseModel):
     """股票委托下单请求。"""
+
     account_id: str = ""
     stock_code: str
     order_type: int
@@ -123,12 +138,14 @@ class OrderRequest(BaseModel):
 
 class CancelRequest(BaseModel):
     """撤单请求。"""
+
     account_id: str = ""
     order_id: int
 
 
 class CancelBySysidRequest(BaseModel):
     """按系统编号撤单请求。"""
+
     account_id: str = ""
     market: str
     sysid: str
@@ -136,17 +153,20 @@ class CancelBySysidRequest(BaseModel):
 
 class QueryOrderRequest(BaseModel):
     """查询委托单请求。"""
+
     account_id: str = ""
     cancelable_only: bool = False
 
 
 class QueryPositionRequest(BaseModel):
     """查询持仓请求。"""
+
     account_id: str = ""
 
 
 class QueryAssetRequest(BaseModel):
     """查询资产请求。"""
+
     account_id: str = ""
 
 
@@ -154,8 +174,10 @@ class QueryAssetRequest(BaseModel):
 # 信用交易（融资融券）模型
 # ---------------------------------------------------------------------------
 
+
 class CreditOrderRequest(BaseModel):
     """信用交易委托请求（通过 order_type 常量区分融资/融券）。"""
+
     account_id: str = ""
     stock_code: str
     order_type: int
@@ -170,8 +192,10 @@ class CreditOrderRequest(BaseModel):
 # 资金划转模型
 # ---------------------------------------------------------------------------
 
+
 class FundTransferRequest(BaseModel):
     """资金划转请求。"""
+
     account_id: str = ""
     transfer_direction: int
     amount: float
@@ -181,8 +205,10 @@ class FundTransferRequest(BaseModel):
 # 银证转账模型（对齐 xttrader 真实 API）
 # ---------------------------------------------------------------------------
 
+
 class BankTransferRequest(BaseModel):
     """银证转账请求。"""
+
     account_id: str = ""
     bank_no: str
     bank_account: str
@@ -193,6 +219,7 @@ class BankTransferRequest(BaseModel):
 
 class BankAmountQueryRequest(BaseModel):
     """银行余额查询请求（含密码，故用 POST）。"""
+
     account_id: str = ""
     bank_no: str
     bank_account: str
@@ -201,6 +228,7 @@ class BankAmountQueryRequest(BaseModel):
 
 class BankTransferStreamRequest(BaseModel):
     """银证转账流水查询请求。"""
+
     account_id: str = ""
     start_date: str
     end_date: str
@@ -212,8 +240,10 @@ class BankTransferStreamRequest(BaseModel):
 # CTP 跨市场资金划转模型
 # ---------------------------------------------------------------------------
 
+
 class CTPCrossMarketTransferRequest(BaseModel):
     """CTP 跨市场资金划转请求（期权/期货双账户）。"""
+
     opt_account_id: str
     ft_account_id: str
     balance: float
@@ -223,8 +253,10 @@ class CTPCrossMarketTransferRequest(BaseModel):
 # 证券划转模型
 # ---------------------------------------------------------------------------
 
+
 class SecuTransferRequest(BaseModel):
     """证券划转请求。"""
+
     account_id: str = ""
     transfer_direction: int
     stock_code: str
@@ -236,8 +268,10 @@ class SecuTransferRequest(BaseModel):
 # 转融通（SMT）模型
 # ---------------------------------------------------------------------------
 
+
 class SMTNegotiateOrderRequest(BaseModel):
     """转融通协商成交委托请求（对齐 xttrader 真实参数）。"""
+
     account_id: str = ""
     src_group_id: str
     order_code: str
@@ -249,6 +283,7 @@ class SMTNegotiateOrderRequest(BaseModel):
 
 class SMTAppointmentOrderRequest(BaseModel):
     """转融通预约委托请求。"""
+
     account_id: str = ""
     order_code: str
     date: str
@@ -258,12 +293,14 @@ class SMTAppointmentOrderRequest(BaseModel):
 
 class SMTAppointmentCancelRequest(BaseModel):
     """转融通预约取消请求。"""
+
     account_id: str = ""
     apply_id: str
 
 
 class SMTCompactRenewalRequest(BaseModel):
     """转融通合约展期请求。"""
+
     account_id: str = ""
     cash_compact_id: str
     order_code: str
@@ -274,6 +311,7 @@ class SMTCompactRenewalRequest(BaseModel):
 
 class SMTCompactReturnRequest(BaseModel):
     """转融通合约归还请求。"""
+
     account_id: str = ""
     src_group_id: str
     cash_compact_id: str
@@ -283,6 +321,7 @@ class SMTCompactReturnRequest(BaseModel):
 
 class SMTQueryRequest(BaseModel):
     """转融通账户查询请求。"""
+
     account_id: str = ""
 
 
@@ -290,8 +329,10 @@ class SMTQueryRequest(BaseModel):
 # 公式/模型计算模型
 # ---------------------------------------------------------------------------
 
+
 class CallFormulaRequest(BaseModel):
     """单只股票公式计算请求。"""
+
     formula_name: str
     stock_code: str
     period: str = "1d"
@@ -304,6 +345,7 @@ class CallFormulaRequest(BaseModel):
 
 class CallFormulaBatchRequest(BaseModel):
     """批量股票公式计算请求。"""
+
     formula_name: str
     stock_codes: list[str]
     period: str = "1d"
@@ -316,6 +358,7 @@ class CallFormulaBatchRequest(BaseModel):
 
 class GenerateIndexDataRequest(BaseModel):
     """自定义指数数据生成请求。"""
+
     index_code: str
     stock_list: list[str] = Field(default=[], alias="stocks")
     weights: list[float]
@@ -328,6 +371,7 @@ class GenerateIndexDataRequest(BaseModel):
 
 class CreateFormulaRequest(BaseModel):
     """创建公式请求。"""
+
     formula_name: str
     formula_file: str
     formula_type: str = ""
@@ -335,6 +379,7 @@ class CreateFormulaRequest(BaseModel):
 
 class ImportFormulaRequest(BaseModel):
     """导入公式请求。"""
+
     formula_file: str
 
 
@@ -342,8 +387,10 @@ class ImportFormulaRequest(BaseModel):
 # 异步委托模型
 # ---------------------------------------------------------------------------
 
+
 class AsyncOrderRequest(BaseModel):
     """异步委托下单请求。"""
+
     account_id: str = ""
     stock_code: str
     order_type: int
@@ -356,6 +403,7 @@ class AsyncOrderRequest(BaseModel):
 
 class AsyncCancelRequest(BaseModel):
     """异步撤单请求。"""
+
     account_id: str = ""
     order_id: int
 
@@ -364,8 +412,10 @@ class AsyncCancelRequest(BaseModel):
 # 数据导出/同步模型（对齐 xttrader 真实签名）
 # ---------------------------------------------------------------------------
 
+
 class ExportDataRequest(BaseModel):
     """数据导出请求。"""
+
     account_id: str = ""
     result_path: str
     data_type: str
@@ -376,6 +426,7 @@ class ExportDataRequest(BaseModel):
 
 class QueryDataRequest(BaseModel):
     """数据查询请求。"""
+
     account_id: str = ""
     result_path: str
     data_type: str
@@ -386,6 +437,7 @@ class QueryDataRequest(BaseModel):
 
 class SyncTransactionRequest(BaseModel):
     """交易数据同步请求。"""
+
     account_id: str = ""
     operation: str
     data_type: str

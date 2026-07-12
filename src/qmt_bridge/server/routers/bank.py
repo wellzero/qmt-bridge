@@ -11,10 +11,12 @@ from fastapi import APIRouter, Depends, Query
 
 from ..deps import get_trader_manager
 from ..helpers import _numpy_to_python, ok_response
-from ..models import BankAmountQueryRequest, BankTransferRequest, BankTransferStreamRequest
+from ..models import BankAmountQueryRequest, BankTransferRequest
 from ..security import require_api_key
 
-router = APIRouter(prefix="/api/bank", tags=["bank"], dependencies=[Depends(require_api_key)])
+router = APIRouter(
+    prefix="/api/bank", tags=["bank"], dependencies=[Depends(require_api_key)]
+)
 
 
 @router.post("/transfer_in")
@@ -46,7 +48,9 @@ def bank_transfer_out(req: BankTransferRequest, manager=Depends(get_trader_manag
 
 
 @router.post("/transfer_in_async")
-def bank_transfer_in_async(req: BankTransferRequest, manager=Depends(get_trader_manager)):
+def bank_transfer_in_async(
+    req: BankTransferRequest, manager=Depends(get_trader_manager)
+):
     """异步银行转证券 → manager.bank_transfer_in_async()"""
     result = manager.bank_transfer_in_async(
         bank_no=req.bank_no,
@@ -60,7 +64,9 @@ def bank_transfer_in_async(req: BankTransferRequest, manager=Depends(get_trader_
 
 
 @router.post("/transfer_out_async")
-def bank_transfer_out_async(req: BankTransferRequest, manager=Depends(get_trader_manager)):
+def bank_transfer_out_async(
+    req: BankTransferRequest, manager=Depends(get_trader_manager)
+):
     """异步证券转银行 → manager.bank_transfer_out_async()"""
     result = manager.bank_transfer_out_async(
         bank_no=req.bank_no,

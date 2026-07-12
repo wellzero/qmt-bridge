@@ -34,7 +34,9 @@ MAJOR_INDICES = [
 
 @router.get("/full_tick")
 def get_full_tick(
-    stocks: str = Query(..., description="股票/指数代码列表，逗号分隔，如 000001.SH,000001.SZ"),
+    stocks: str = Query(
+        ..., description="股票/指数代码列表，逗号分隔，如 000001.SH,000001.SZ"
+    ),
 ):
     """获取实时全推行情快照。
 
@@ -70,12 +72,16 @@ def get_major_indices():
 
 @router.get("/market_data_ex")
 def get_market_data_ex(
-    stocks: str = Query(..., description="股票代码列表，逗号分隔，如 000001.SZ,600519.SH"),
+    stocks: str = Query(
+        ..., description="股票代码列表，逗号分隔，如 000001.SZ,600519.SH"
+    ),
     period: str = Query("1d", description="K线周期: tick/1m/5m/15m/30m/60m/1d"),
     start_time: str = Query("", description="开始时间 YYYYMMDD 或 YYYYMMDDHHmmss"),
     end_time: str = Query("", description="结束时间"),
     count: int = Query(-1, description="返回条数，-1 表示不限"),
-    dividend_type: str = Query("none", description="除权类型: none/front/back/front_ratio/back_ratio"),
+    dividend_type: str = Query(
+        "none", description="除权类型: none/front/back/front_ratio/back_ratio"
+    ),
     fill_data: bool = Query(True, description="是否填充空数据"),
 ):
     """获取扩展 K 线历史行情数据。
@@ -295,7 +301,9 @@ def get_full_kline(
 
     底层调用: xtdata.get_full_kline(stock, period=..., ...)
     """
-    raw = xtdata.get_full_kline(stock, period=period, start_time=start_time, end_time=end_time)
+    raw = xtdata.get_full_kline(
+        stock, period=period, start_time=start_time, end_time=end_time
+    )
     return {"stock": stock, "data": _numpy_to_python(raw)}
 
 
@@ -319,7 +327,9 @@ def get_fullspeed_orderbook(
 
     底层调用: xtdata.get_fullspeed_orderbook(stock, start_time=..., end_time=...)
     """
-    raw = xtdata.get_fullspeed_orderbook(stock, start_time=start_time, end_time=end_time)
+    raw = xtdata.get_fullspeed_orderbook(
+        stock, start_time=start_time, end_time=end_time
+    )
     return {"stock": stock, "data": _numpy_to_python(raw)}
 
 

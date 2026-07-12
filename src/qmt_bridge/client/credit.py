@@ -44,16 +44,19 @@ class CreditMixin:
         Returns:
             委托结果
         """
-        return self._post("/api/credit/order", {
-            "stock_code": stock_code,
-            "order_type": order_type,
-            "order_volume": order_volume,
-            "price_type": price_type,
-            "price": price,
-            "strategy_name": strategy_name,
-            "order_remark": order_remark,
-            "account_id": account_id,
-        })
+        return self._post(
+            "/api/credit/order",
+            {
+                "stock_code": stock_code,
+                "order_type": order_type,
+                "order_volume": order_volume,
+                "price_type": price_type,
+                "price": price,
+                "strategy_name": strategy_name,
+                "order_remark": order_remark,
+                "account_id": account_id,
+            },
+        )
 
     def query_credit_positions(self, account_id: str = "") -> dict:
         """查询信用账户持仓。

@@ -35,7 +35,7 @@ def test_get_local_data() -> tuple[bool, str]:
         if r.returncode == 0:
             return True, r.stdout.strip()
         err_lines = r.stderr.strip().splitlines()[-2:]
-        return False, f"exit={r.returncode} | {' '.join(l.strip() for l in err_lines)}"
+        return False, f"exit={r.returncode} | {' '.join(line.strip() for line in err_lines)}"
     except subprocess.TimeoutExpired:
         return False, "TIMEOUT"
 
@@ -56,7 +56,7 @@ def test_get_market_data_ex() -> tuple[bool, str]:
         if r.returncode == 0:
             return True, r.stdout.strip()
         err_lines = r.stderr.strip().splitlines()[-2:]
-        return False, f"exit={r.returncode} | {' '.join(l.strip() for l in err_lines)}"
+        return False, f"exit={r.returncode} | {' '.join(line.strip() for line in err_lines)}"
     except subprocess.TimeoutExpired:
         return False, "TIMEOUT"
 
@@ -117,7 +117,6 @@ def main():
         # 逐个保留策略：每次只保留一个子项，其余全移除
         # 如果只保留某个子项时崩溃，说明该子项是问题源
         for item in items:
-            item_path = os.path.join(DATADIR, item)
             other_items = [x for x in items if x != item]
 
             # 移除其他所有项

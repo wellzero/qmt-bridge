@@ -31,12 +31,15 @@ class TabularMixin:
         Returns:
             查询结果数据字典
         """
-        resp = self._get("/api/tabular/data", {
-            "table_name": table_name,
-            "stocks": ",".join(stocks) if stocks else "",
-            "start_time": start_time,
-            "end_time": end_time,
-        })
+        resp = self._get(
+            "/api/tabular/data",
+            {
+                "table_name": table_name,
+                "stocks": ",".join(stocks) if stocks else "",
+                "start_time": start_time,
+                "end_time": end_time,
+            },
+        )
         return resp.get("data", {})
 
     def list_tables(self) -> list:
@@ -66,10 +69,13 @@ class TabularMixin:
         Returns:
             公式表格数据字典
         """
-        resp = self._get("/api/tabular/formula", {
-            "table_name": table_name,
-            "stocks": ",".join(stocks) if stocks else "",
-            "start_time": start_time,
-            "end_time": end_time,
-        })
+        resp = self._get(
+            "/api/tabular/formula",
+            {
+                "table_name": table_name,
+                "stocks": ",".join(stocks) if stocks else "",
+                "start_time": start_time,
+                "end_time": end_time,
+            },
+        )
         return resp.get("data", {})

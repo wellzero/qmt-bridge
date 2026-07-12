@@ -90,15 +90,13 @@ class NotifierManager:
             settings: 应用配置对象，包含通知相关的所有配置项。
         """
         self._backends: list[NotifierBackend] = []
-        self._allow: set[str] | None = None   # 事件类型白名单，None 表示允许所有
-        self._deny: set[str] = set()           # 事件类型黑名单
+        self._allow: set[str] | None = None  # 事件类型白名单，None 表示允许所有
+        self._deny: set[str] = set()  # 事件类型黑名单
 
         # 解析事件类型白名单（逗号分隔的字符串）
         if settings.notify_event_types:
             self._allow = {
-                t.strip()
-                for t in settings.notify_event_types.split(",")
-                if t.strip()
+                t.strip() for t in settings.notify_event_types.split(",") if t.strip()
             }
         # 解析事件类型黑名单
         if settings.notify_ignore_event_types:
@@ -110,9 +108,7 @@ class NotifierManager:
 
         # 根据配置的后端名称逐个实例化通知后端
         backend_names = [
-            n.strip()
-            for n in settings.notify_backends.split(",")
-            if n.strip()
+            n.strip() for n in settings.notify_backends.split(",") if n.strip()
         ]
         for bname in backend_names:
             backend = self._create_backend(bname, settings)
@@ -126,9 +122,7 @@ class NotifierManager:
             )
 
     @staticmethod
-    def _create_backend(
-        name: str, settings: Settings
-    ) -> NotifierBackend | None:
+    def _create_backend(name: str, settings: Settings) -> NotifierBackend | None:
         """根据后端名称创建对应的通知后端实例。
 
         采用工厂模式，根据名称动态导入并实例化后端。
@@ -144,7 +138,9 @@ class NotifierManager:
             from .feishu import FeishuWebhookBackend
 
             if not settings.feishu_webhook_url:
-                logger.warning("feishu backend requested but FEISHU_WEBHOOK_URL is empty")
+                logger.warning(
+                    "feishu backend requested but FEISHU_WEBHOOK_URL is empty"
+                )
                 return None
             return FeishuWebhookBackend(
                 webhook_url=settings.feishu_webhook_url,

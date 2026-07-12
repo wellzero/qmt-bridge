@@ -39,12 +39,8 @@ def test_place_order_uses_paper_endpoint(paper_client: QMTClient):
         mock_resp.read.return_value = (
             '{"order_id": 123, "status": "submitted"}'.encode()
         )
-        mock_opener.open.return_value.__enter__ = MagicMock(
-            return_value=mock_resp
-        )
-        mock_opener.open.return_value.__exit__ = MagicMock(
-            return_value=False
-        )
+        mock_opener.open.return_value.__enter__ = MagicMock(return_value=mock_resp)
+        mock_opener.open.return_value.__exit__ = MagicMock(return_value=False)
 
         result = paper_client.place_order(
             stock_code="000001.SZ",
@@ -69,12 +65,8 @@ def test_query_orders_uses_paper_endpoint(paper_client: QMTClient):
     with patch.object(paper_client, "_opener") as mock_opener:
         mock_resp = MagicMock()
         mock_resp.read.return_value = '{"data": []}'.encode()
-        mock_opener.open.return_value.__enter__ = MagicMock(
-            return_value=mock_resp
-        )
-        mock_opener.open.return_value.__exit__ = MagicMock(
-            return_value=False
-        )
+        mock_opener.open.return_value.__enter__ = MagicMock(return_value=mock_resp)
+        mock_opener.open.return_value.__exit__ = MagicMock(return_value=False)
 
         paper_client.query_orders(account_id="paper_acc")
 

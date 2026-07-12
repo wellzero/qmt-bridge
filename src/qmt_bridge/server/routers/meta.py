@@ -112,6 +112,7 @@ def get_xtdata_version():
     """
     try:
         import xtquant
+
         version = getattr(xtquant, "__version__", "unknown")
     except Exception:
         version = "unknown"

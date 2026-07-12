@@ -35,14 +35,17 @@ class BankMixin:
         Returns:
             转账结果
         """
-        return self._post("/api/bank/transfer_in", {
-            "bank_no": bank_no,
-            "bank_account": bank_account,
-            "balance": balance,
-            "bank_pwd": bank_pwd,
-            "fund_pwd": fund_pwd,
-            "account_id": account_id,
-        })
+        return self._post(
+            "/api/bank/transfer_in",
+            {
+                "bank_no": bank_no,
+                "bank_account": bank_account,
+                "balance": balance,
+                "bank_pwd": bank_pwd,
+                "fund_pwd": fund_pwd,
+                "account_id": account_id,
+            },
+        )
 
     def bank_transfer_out(
         self,
@@ -66,14 +69,17 @@ class BankMixin:
         Returns:
             转账结果
         """
-        return self._post("/api/bank/transfer_out", {
-            "bank_no": bank_no,
-            "bank_account": bank_account,
-            "balance": balance,
-            "bank_pwd": bank_pwd,
-            "fund_pwd": fund_pwd,
-            "account_id": account_id,
-        })
+        return self._post(
+            "/api/bank/transfer_out",
+            {
+                "bank_no": bank_no,
+                "bank_account": bank_account,
+                "balance": balance,
+                "bank_pwd": bank_pwd,
+                "fund_pwd": fund_pwd,
+                "account_id": account_id,
+            },
+        )
 
     def bank_transfer_in_async(
         self,
@@ -97,14 +103,17 @@ class BankMixin:
         Returns:
             包含请求序号的字典
         """
-        return self._post("/api/bank/transfer_in_async", {
-            "bank_no": bank_no,
-            "bank_account": bank_account,
-            "balance": balance,
-            "bank_pwd": bank_pwd,
-            "fund_pwd": fund_pwd,
-            "account_id": account_id,
-        })
+        return self._post(
+            "/api/bank/transfer_in_async",
+            {
+                "bank_no": bank_no,
+                "bank_account": bank_account,
+                "balance": balance,
+                "bank_pwd": bank_pwd,
+                "fund_pwd": fund_pwd,
+                "account_id": account_id,
+            },
+        )
 
     def bank_transfer_out_async(
         self,
@@ -128,14 +137,17 @@ class BankMixin:
         Returns:
             包含请求序号的字典
         """
-        return self._post("/api/bank/transfer_out_async", {
-            "bank_no": bank_no,
-            "bank_account": bank_account,
-            "balance": balance,
-            "bank_pwd": bank_pwd,
-            "fund_pwd": fund_pwd,
-            "account_id": account_id,
-        })
+        return self._post(
+            "/api/bank/transfer_out_async",
+            {
+                "bank_no": bank_no,
+                "bank_account": bank_account,
+                "balance": balance,
+                "bank_pwd": bank_pwd,
+                "fund_pwd": fund_pwd,
+                "account_id": account_id,
+            },
+        )
 
     def query_bank_info(self, account_id: str = "") -> dict:
         """查询绑定银行信息。
@@ -166,12 +178,15 @@ class BankMixin:
         Returns:
             银行余额信息
         """
-        return self._post("/api/bank/amount", {
-            "bank_no": bank_no,
-            "bank_account": bank_account,
-            "bank_pwd": bank_pwd,
-            "account_id": account_id,
-        })
+        return self._post(
+            "/api/bank/amount",
+            {
+                "bank_no": bank_no,
+                "bank_account": bank_account,
+                "bank_pwd": bank_pwd,
+                "account_id": account_id,
+            },
+        )
 
     def query_bank_transfer_stream(
         self,
@@ -193,10 +208,13 @@ class BankMixin:
         Returns:
             转账流水记录
         """
-        return self._get("/api/bank/transfer_stream", {
-            "start_date": start_date,
-            "end_date": end_date,
-            "bank_no": bank_no,
-            "bank_account": bank_account,
-            "account_id": account_id,
-        })
+        return self._get(
+            "/api/bank/transfer_stream",
+            {
+                "start_date": start_date,
+                "end_date": end_date,
+                "bank_no": bank_no,
+                "bank_account": bank_account,
+                "account_id": account_id,
+            },
+        )

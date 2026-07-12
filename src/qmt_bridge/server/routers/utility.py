@@ -58,7 +58,9 @@ def get_batch_stock_name(
     if isinstance(data, dict):
         for code, info in data.items():
             # 逐个提取中文名称
-            result[code] = info.get("InstrumentName", "") if isinstance(info, dict) else ""
+            result[code] = (
+                info.get("InstrumentName", "") if isinstance(info, dict) else ""
+            )
     return {"data": result}
 
 
@@ -113,4 +115,8 @@ def search_stocks(
     keyword_upper = keyword.upper()
     # 在代码中进行大小写不敏感的关键字匹配
     matches = [s for s in all_stocks if keyword_upper in s.upper()]
-    return {"keyword": keyword, "count": len(matches[:limit]), "stocks": matches[:limit]}
+    return {
+        "keyword": keyword,
+        "count": len(matches[:limit]),
+        "stocks": matches[:limit],
+    }

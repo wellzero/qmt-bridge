@@ -12,8 +12,6 @@
 - 使用 hmac.compare_digest 进行常量时间比较，防止时序攻击
 """
 
-import asyncio
-import json
 import hmac
 import logging
 

@@ -38,12 +38,24 @@ logger = logging.getLogger("qmt_bridge")
 
 # (名称, 下载函数) — 每日执行的基础数据下载任务列表
 DAILY_TASKS: list[tuple[str, functools.partial]] = [
-    ("download_sector_data", functools.partial(xtdata.download_sector_data)),         # 板块成分数据
-    ("download_holiday_data", functools.partial(xtdata.download_holiday_data)),        # 节假日日历
-    ("download_history_contracts", functools.partial(xtdata.download_history_contracts)),  # 历史合约
-    ("download_index_weight", functools.partial(xtdata.download_index_weight)),        # 指数权重
-    ("download_etf_info", functools.partial(xtdata.download_etf_info)),               # ETF 信息
-    ("download_cb_data", functools.partial(xtdata.download_cb_data)),                 # 可转债数据
+    (
+        "download_sector_data",
+        functools.partial(xtdata.download_sector_data),
+    ),  # 板块成分数据
+    (
+        "download_holiday_data",
+        functools.partial(xtdata.download_holiday_data),
+    ),  # 节假日日历
+    (
+        "download_history_contracts",
+        functools.partial(xtdata.download_history_contracts),
+    ),  # 历史合约
+    (
+        "download_index_weight",
+        functools.partial(xtdata.download_index_weight),
+    ),  # 指数权重
+    ("download_etf_info", functools.partial(xtdata.download_etf_info)),  # ETF 信息
+    ("download_cb_data", functools.partial(xtdata.download_cb_data)),  # 可转债数据
 ]
 
 
@@ -69,7 +81,9 @@ async def _run_kline_incremental(
     settings: Settings,
 ) -> None:
     """在线程池中执行 K 线增量下载（所有配置的周期）。"""
-    periods = [p.strip() for p in settings.scheduler_kline_periods.split(",") if p.strip()]
+    periods = [
+        p.strip() for p in settings.scheduler_kline_periods.split(",") if p.strip()
+    ]
     if not periods:
         return
 
@@ -78,7 +92,8 @@ async def _run_kline_incremental(
     # 获取股票列表
     try:
         stocks = await loop.run_in_executor(
-            None, lambda: get_stock_list(settings.scheduler_kline_sectors),
+            None,
+            lambda: get_stock_list(settings.scheduler_kline_sectors),
         )
     except Exception:
         logger.exception("K线增量下载: 获取股票列表失败")
@@ -88,8 +103,12 @@ async def _run_kline_incremental(
         logger.warning("K线增量下载: 股票列表为空，跳过")
         return
 
-    logger.info("K线增量下载开始: 板块=%s, 股票=%d只, 周期=%s",
-                settings.scheduler_kline_sectors, len(stocks), periods)
+    logger.info(
+        "K线增量下载开始: 板块=%s, 股票=%d只, 周期=%s",
+        settings.scheduler_kline_sectors,
+        len(stocks),
+        periods,
+    )
 
     for period in periods:
         task_key = f"kline:{period}"
@@ -100,7 +119,8 @@ async def _run_kline_incremental(
         state.set_running(task_key, True)
         try:
             result = await loop.run_in_executor(
-                None, lambda p=period: download_kline_incremental(stocks, p),
+                None,
+                lambda p=period: download_kline_incremental(stocks, p),
             )
             state.set_result(task_key, asdict(result))
         except Exception:
@@ -123,7 +143,8 @@ async def _run_financial_incremental(
 
     try:
         stocks = await loop.run_in_executor(
-            None, lambda: get_stock_list(settings.scheduler_financial_sectors),
+            None,
+            lambda: get_stock_list(settings.scheduler_financial_sectors),
         )
     except Exception:
         logger.exception("财务增量下载: 获取股票列表失败")
@@ -133,13 +154,17 @@ async def _run_financial_incremental(
         logger.warning("财务增量下载: 股票列表为空，跳过")
         return
 
-    logger.info("财务增量下载开始: 板块=%s, 股票=%d只",
-                settings.scheduler_financial_sectors, len(stocks))
+    logger.info(
+        "财务增量下载开始: 板块=%s, 股票=%d只",
+        settings.scheduler_financial_sectors,
+        len(stocks),
+    )
 
     state.set_running(task_key, True)
     try:
         result = await loop.run_in_executor(
-            None, lambda: download_financial_incremental(stocks),
+            None,
+            lambda: download_financial_incremental(stocks),
         )
         state.set_result(task_key, result)
     except Exception:

@@ -101,16 +101,19 @@ async def ws_formula(ws: WebSocket):
                             "stock_code": stock,
                             "data": _safe_serialize(data),
                         }
-                        asyncio.run_coroutine_threadsafe(
-                            ws.send_json(payload), loop
-                        )
+                        asyncio.run_coroutine_threadsafe(ws.send_json(payload), loop)
                     except Exception:
                         pass
 
                 # 向 xtdata 注册公式订阅
                 seq_id = xtdata.subscribe_formula(
-                    formula_name, stock_code, period, count,
-                    dividend_type, _callback, **params,
+                    formula_name,
+                    stock_code,
+                    period,
+                    count,
+                    dividend_type,
+                    _callback,
+                    **params,
                 )
                 subscriptions[seq_id] = True
                 await ws.send_json({"action": "subscribed", "seq_id": seq_id})
@@ -135,6 +138,7 @@ async def ws_formula(ws: WebSocket):
     finally:
         # 清理：取消所有未取消的公式订阅
         from xtquant import xtdata as _xtd
+
         for seq_id in subscriptions:
             try:
                 _xtd.unsubscribe_formula(seq_id)
@@ -152,6 +156,7 @@ def _safe_serialize(data):
         转换为原生 Python 类型的数据。
     """
     import numpy as np
+
     if isinstance(data, dict):
         return {k: _safe_serialize(v) for k, v in data.items()}
     if isinstance(data, (list, tuple)):

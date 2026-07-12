@@ -45,5 +45,3 @@ def get_cb_info(
     """
     raw = xtdata.get_cb_info(stock)
     return {"stock": stock, "data": _numpy_to_python(raw)}
-
-

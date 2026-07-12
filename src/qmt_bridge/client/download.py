@@ -52,12 +52,15 @@ class DownloadMixin:
         Returns:
             下载任务状态信息
         """
-        return self._post("/api/download/history_data2", {
-            "stocks": stocks,
-            "period": period,
-            "start_time": start_time,
-            "end_time": end_time,
-        })
+        return self._post(
+            "/api/download/history_data2",
+            {
+                "stocks": stocks,
+                "period": period,
+                "start_time": start_time,
+                "end_time": end_time,
+            },
+        )
 
     def download_sector_data(self) -> dict:
         """下载板块成分数据。
@@ -149,10 +152,13 @@ class DownloadMixin:
         Returns:
             下载结果信息
         """
-        return self._post("/api/download/financial_data2", {
-            "stocks": stocks,
-            "tables": tables or [],
-        })
+        return self._post(
+            "/api/download/financial_data2",
+            {
+                "stocks": stocks,
+                "tables": tables or [],
+            },
+        )
 
     def download_metatable_data(self) -> dict:
         """下载合约元数据表（期货合约品种信息）。
@@ -204,12 +210,15 @@ class DownloadMixin:
         Returns:
             下载结果信息
         """
-        return self._post("/api/download/his_st_data", {
-            "stock_list": stocks,
-            "period": period,
-            "start_time": start_time,
-            "end_time": end_time,
-        })
+        return self._post(
+            "/api/download/his_st_data",
+            {
+                "stock_list": stocks,
+                "period": period,
+                "start_time": start_time,
+                "end_time": end_time,
+            },
+        )
 
     def download_tabular_data(self, tables: list[str]) -> dict:
         """下载表格数据。
@@ -223,6 +232,9 @@ class DownloadMixin:
         Returns:
             下载结果信息
         """
-        return self._post("/api/download/tabular_data", {
-            "table_list": tables,
-        })
+        return self._post(
+            "/api/download/tabular_data",
+            {
+                "table_list": tables,
+            },
+        )

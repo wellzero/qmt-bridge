@@ -39,16 +39,19 @@ class FormulaMixin:
         Returns:
             公式计算结果字典
         """
-        return self._post("/api/formula/call", {
-            "formula_name": formula_name,
-            "stock_code": stock_code,
-            "period": period,
-            "start_time": start_time,
-            "end_time": end_time,
-            "count": count,
-            "dividend_type": dividend_type,
-            "params": params,
-        })
+        return self._post(
+            "/api/formula/call",
+            {
+                "formula_name": formula_name,
+                "stock_code": stock_code,
+                "period": period,
+                "start_time": start_time,
+                "end_time": end_time,
+                "count": count,
+                "dividend_type": dividend_type,
+                "params": params,
+            },
+        )
 
     def call_formula_batch(
         self,
@@ -79,16 +82,19 @@ class FormulaMixin:
         Returns:
             以股票代码为键的计算结果字典
         """
-        return self._post("/api/formula/call_batch", {
-            "formula_name": formula_name,
-            "stock_codes": stock_codes,
-            "period": period,
-            "start_time": start_time,
-            "end_time": end_time,
-            "count": count,
-            "dividend_type": dividend_type,
-            "params": params,
-        })
+        return self._post(
+            "/api/formula/call_batch",
+            {
+                "formula_name": formula_name,
+                "stock_codes": stock_codes,
+                "period": period,
+                "start_time": start_time,
+                "end_time": end_time,
+                "count": count,
+                "dividend_type": dividend_type,
+                "params": params,
+            },
+        )
 
     def generate_index_data(
         self,
@@ -115,14 +121,17 @@ class FormulaMixin:
         Returns:
             合成指数的行情数据字典
         """
-        return self._post("/api/formula/generate_index_data", {
-            "index_code": index_code,
-            "stocks": stocks,
-            "weights": weights,
-            "period": period,
-            "start_time": start_time,
-            "end_time": end_time,
-        })
+        return self._post(
+            "/api/formula/generate_index_data",
+            {
+                "index_code": index_code,
+                "stocks": stocks,
+                "weights": weights,
+                "period": period,
+                "start_time": start_time,
+                "end_time": end_time,
+            },
+        )
 
     def create_formula(
         self, formula_name: str, formula_file: str, formula_type: str = ""
@@ -137,11 +146,14 @@ class FormulaMixin:
         Returns:
             创建结果
         """
-        return self._post("/api/formula/create", {
-            "formula_name": formula_name,
-            "formula_file": formula_file,
-            "formula_type": formula_type,
-        })
+        return self._post(
+            "/api/formula/create",
+            {
+                "formula_name": formula_name,
+                "formula_file": formula_file,
+                "formula_type": formula_type,
+            },
+        )
 
     def import_formula(self, formula_file: str) -> dict:
         """导入公式。
@@ -152,9 +164,12 @@ class FormulaMixin:
         Returns:
             导入结果
         """
-        return self._post("/api/formula/import", {
-            "formula_file": formula_file,
-        })
+        return self._post(
+            "/api/formula/import",
+            {
+                "formula_file": formula_file,
+            },
+        )
 
     def del_formula(self, formula_name: str) -> dict:
         """删除公式。

@@ -73,7 +73,11 @@ async def ws_download_progress(ws: WebSocket):
         results = await loop.run_in_executor(
             None,
             lambda: download_history_data2_safe(
-                stocks, period, start_time, end_time, callback=on_progress,
+                stocks,
+                period,
+                start_time,
+                end_time,
+                callback=on_progress,
             ),
         )
 

@@ -30,10 +30,13 @@ class InstrumentMixin:
         Returns:
             以合约代码为键的详情字典
         """
-        resp = self._get("/api/instrument/detail_list", {
-            "stocks": ",".join(stocks),
-            "iscomplete": iscomplete,
-        })
+        resp = self._get(
+            "/api/instrument/detail_list",
+            {
+                "stocks": ",".join(stocks),
+                "iscomplete": iscomplete,
+            },
+        )
         return resp.get("data", {})
 
     def get_instrument_type(self, stock: str) -> str:
@@ -64,10 +67,13 @@ class InstrumentMixin:
         Returns:
             IPO 信息字典
         """
-        resp = self._get("/api/instrument/ipo_info", {
-            "start_time": start_time,
-            "end_time": end_time,
-        })
+        resp = self._get(
+            "/api/instrument/ipo_info",
+            {
+                "start_time": start_time,
+                "end_time": end_time,
+            },
+        )
         return resp.get("data", {})
 
     def get_index_weight(self, index_code: str) -> dict:

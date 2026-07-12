@@ -29,4 +29,3 @@ class CBMixin:
         """
         resp = self._get("/api/cb/info", {"stock": stock})
         return resp.get("data", {})
-

@@ -65,9 +65,12 @@ class UtilityMixin:
         Returns:
             匹配的股票代码列表
         """
-        resp = self._get("/api/utility/search", {
-            "keyword": keyword,
-            "category": category,
-            "limit": limit,
-        })
+        resp = self._get(
+            "/api/utility/search",
+            {
+                "keyword": keyword,
+                "category": category,
+                "limit": limit,
+            },
+        )
         return resp.get("stocks", [])

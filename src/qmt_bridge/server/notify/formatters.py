@@ -15,16 +15,16 @@ from __future__ import annotations
 # 卡片头部颜色映射（飞书 template_color 参数）
 # 绿色表示积极事件，红色表示错误/断开，蓝色表示信息类事件
 _COLORS: dict[str, str] = {
-    "trade": "green",           # 成交 — 绿色
-    "order": "blue",            # 委托更新 — 蓝色
-    "order_error": "red",       # 委托错误 — 红色
-    "cancel_error": "red",      # 撤单失败 — 红色
-    "connected": "green",       # 连接建立 — 绿色
-    "disconnected": "red",      # 连接断开 — 红色
-    "asset": "blue",            # 资产变动 — 蓝色
-    "position": "blue",         # 持仓变动 — 蓝色
-    "account_status": "blue",   # 账户状态 — 蓝色
-    "test": "turquoise",        # 测试通知 — 青绿色
+    "trade": "green",  # 成交 — 绿色
+    "order": "blue",  # 委托更新 — 蓝色
+    "order_error": "red",  # 委托错误 — 红色
+    "cancel_error": "red",  # 撤单失败 — 红色
+    "connected": "green",  # 连接建立 — 绿色
+    "disconnected": "red",  # 连接断开 — 红色
+    "asset": "blue",  # 资产变动 — 蓝色
+    "position": "blue",  # 持仓变动 — 蓝色
+    "account_status": "blue",  # 账户状态 — 蓝色
+    "test": "turquoise",  # 测试通知 — 青绿色
 }
 
 # 卡片标题文本映射
@@ -91,8 +91,12 @@ def _build_fields(event: dict) -> list[dict]:
 
     if etype == "trade":
         # 成交通知：展示成交详情
-        direction = _ORDER_TYPE_MAP.get(data.get("order_type"), str(data.get("order_type", "")))
-        amount = (data.get("traded_volume", 0) or 0) * (data.get("traded_price", 0) or 0)
+        direction = _ORDER_TYPE_MAP.get(
+            data.get("order_type"), str(data.get("order_type", ""))
+        )
+        amount = (data.get("traded_volume", 0) or 0) * (
+            data.get("traded_price", 0) or 0
+        )
         return [
             _field("股票", data.get("stock_code", "")),
             _field("方向", direction),
@@ -104,7 +108,9 @@ def _build_fields(event: dict) -> list[dict]:
 
     if etype == "order":
         # 委托更新：展示委托详情和当前状态
-        direction = _ORDER_TYPE_MAP.get(data.get("order_type"), str(data.get("order_type", "")))
+        direction = _ORDER_TYPE_MAP.get(
+            data.get("order_type"), str(data.get("order_type", ""))
+        )
         return [
             _field("股票", data.get("stock_code", "")),
             _field("方向", direction),

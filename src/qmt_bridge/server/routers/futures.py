@@ -35,7 +35,9 @@ def get_main_contract(
 
     底层调用: xtdata.get_main_contract(code_market, start_time=..., end_time=...)
     """
-    raw = xtdata.get_main_contract(code_market, start_time=start_time, end_time=end_time)
+    raw = xtdata.get_main_contract(
+        code_market, start_time=start_time, end_time=end_time
+    )
     return {"code_market": code_market, "data": _numpy_to_python(raw)}
 
 
@@ -60,5 +62,7 @@ def get_sec_main_contract(
 
     底层调用: xtdata.get_sec_main_contract(code_market, start_time=..., end_time=...)
     """
-    raw = xtdata.get_sec_main_contract(code_market, start_time=start_time, end_time=end_time)
+    raw = xtdata.get_sec_main_contract(
+        code_market, start_time=start_time, end_time=end_time
+    )
     return {"code_market": code_market, "data": _numpy_to_python(raw)}

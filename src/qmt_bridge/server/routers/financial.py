@@ -19,7 +19,9 @@ def get_financial_data(
     tables: str = Query("", description="财务表名列表，逗号分隔，为空取全部"),
     start_time: str = Query("", description="开始时间"),
     end_time: str = Query("", description="结束时间"),
-    report_type: str = Query("report_time", description="报告类型: report_time/announce_time"),
+    report_type: str = Query(
+        "report_time", description="报告类型: report_time/announce_time"
+    ),
 ):
     """获取上市公司财务报表数据。
 

@@ -24,7 +24,9 @@ from ..models import (
 )
 from ..security import require_api_key
 
-router = APIRouter(prefix="/api/smt", tags=["smt"], dependencies=[Depends(require_api_key)])
+router = APIRouter(
+    prefix="/api/smt", tags=["smt"], dependencies=[Depends(require_api_key)]
+)
 
 
 @router.get("/quoter")
@@ -58,7 +60,9 @@ def smt_query_order(
 
 
 @router.post("/negotiate_order_async")
-def smt_negotiate_order_async(req: SMTNegotiateOrderRequest, manager=Depends(get_trader_manager)):
+def smt_negotiate_order_async(
+    req: SMTNegotiateOrderRequest, manager=Depends(get_trader_manager)
+):
     """异步协商下单 → manager.smt_negotiate_order_async()"""
     result = manager.smt_negotiate_order_async(
         src_group_id=req.src_group_id,
@@ -73,7 +77,9 @@ def smt_negotiate_order_async(req: SMTNegotiateOrderRequest, manager=Depends(get
 
 
 @router.post("/appointment_order_async")
-def smt_appointment_order_async(req: SMTAppointmentOrderRequest, manager=Depends(get_trader_manager)):
+def smt_appointment_order_async(
+    req: SMTAppointmentOrderRequest, manager=Depends(get_trader_manager)
+):
     """异步预约委托 → manager.smt_appointment_order_async()"""
     result = manager.smt_appointment_order_async(
         order_code=req.order_code,
@@ -86,7 +92,9 @@ def smt_appointment_order_async(req: SMTAppointmentOrderRequest, manager=Depends
 
 
 @router.post("/appointment_cancel_async")
-def smt_appointment_cancel_async(req: SMTAppointmentCancelRequest, manager=Depends(get_trader_manager)):
+def smt_appointment_cancel_async(
+    req: SMTAppointmentCancelRequest, manager=Depends(get_trader_manager)
+):
     """异步取消预约 → manager.smt_appointment_cancel_async()"""
     result = manager.smt_appointment_cancel_async(
         apply_id=req.apply_id,
@@ -96,7 +104,9 @@ def smt_appointment_cancel_async(req: SMTAppointmentCancelRequest, manager=Depen
 
 
 @router.post("/compact_renewal_async")
-def smt_compact_renewal_async(req: SMTCompactRenewalRequest, manager=Depends(get_trader_manager)):
+def smt_compact_renewal_async(
+    req: SMTCompactRenewalRequest, manager=Depends(get_trader_manager)
+):
     """异步合约展期 → manager.smt_compact_renewal_async()"""
     result = manager.smt_compact_renewal_async(
         cash_compact_id=req.cash_compact_id,
@@ -110,7 +120,9 @@ def smt_compact_renewal_async(req: SMTCompactRenewalRequest, manager=Depends(get
 
 
 @router.post("/compact_return_async")
-def smt_compact_return_async(req: SMTCompactReturnRequest, manager=Depends(get_trader_manager)):
+def smt_compact_return_async(
+    req: SMTCompactReturnRequest, manager=Depends(get_trader_manager)
+):
     """异步合约归还 → manager.smt_compact_return_async()"""
     result = manager.smt_compact_return_async(
         src_group_id=req.src_group_id,

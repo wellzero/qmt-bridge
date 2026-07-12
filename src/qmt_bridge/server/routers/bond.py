@@ -47,7 +47,8 @@ def get_bond_list():
     if not stock_set:
         logger.warning(
             "所有债券板块均未返回数据，已尝试: %s；失败详情: %s",
-            BOND_SECTORS, failures,
+            BOND_SECTORS,
+            failures,
         )
 
     stock_list = sorted(stock_set)

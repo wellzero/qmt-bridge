@@ -11,10 +11,16 @@ from fastapi import APIRouter, Depends
 
 from ..deps import get_trader_manager
 from ..helpers import _numpy_to_python, ok_response
-from ..models import CTPCrossMarketTransferRequest, FundTransferRequest, SecuTransferRequest
+from ..models import (
+    CTPCrossMarketTransferRequest,
+    FundTransferRequest,
+    SecuTransferRequest,
+)
 from ..security import require_api_key
 
-router = APIRouter(prefix="/api/fund", tags=["fund"], dependencies=[Depends(require_api_key)])
+router = APIRouter(
+    prefix="/api/fund", tags=["fund"], dependencies=[Depends(require_api_key)]
+)
 
 
 @router.post("/transfer")

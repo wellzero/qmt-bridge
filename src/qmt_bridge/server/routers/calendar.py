@@ -204,5 +204,3 @@ def get_trading_dates_count(
     raw = xtdata.get_trading_dates(market, start_time=start_time, end_time=end_time)
     dates = _numpy_to_python(raw)
     return {"market": market, "count": len(dates)}
-
-

@@ -57,7 +57,12 @@ def get_history(
         count=count,
     )
     records = _market_data_to_records(raw, [stock], field_list)
-    return {"stock": stock, "period": period, "count": count, "data": records.get(stock, [])}
+    return {
+        "stock": stock,
+        "period": period,
+        "count": count,
+        "data": records.get(stock, []),
+    }
 
 
 @router.get("/api/batch_history")

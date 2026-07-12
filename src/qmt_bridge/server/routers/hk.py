@@ -28,7 +28,9 @@ def get_hk_stock_list():
     底层调用: xtdata.get_stock_list_in_sector("沪港通") + xtdata.get_stock_list_in_sector("深港通")
     """
     # 合并沪港通和深港通标的列表
-    stock_list = xtdata.get_stock_list_in_sector("沪港通") + xtdata.get_stock_list_in_sector("深港通")
+    stock_list = xtdata.get_stock_list_in_sector(
+        "沪港通"
+    ) + xtdata.get_stock_list_in_sector("深港通")
     return {"count": len(stock_list), "stocks": stock_list}
 
 
@@ -55,8 +57,14 @@ def get_hk_connect_stocks(
         stock_list = xtdata.get_stock_list_in_sector("港股通")
     else:
         # 北向：境外投资者可买卖的 A 股标的（沪股通 + 深股通）
-        stock_list = xtdata.get_stock_list_in_sector("沪股通") + xtdata.get_stock_list_in_sector("深股通")
-    return {"connect_type": connect_type, "count": len(stock_list), "stocks": stock_list}
+        stock_list = xtdata.get_stock_list_in_sector(
+            "沪股通"
+        ) + xtdata.get_stock_list_in_sector("深股通")
+    return {
+        "connect_type": connect_type,
+        "count": len(stock_list),
+        "stocks": stock_list,
+    }
 
 
 @router.get("/broker_dict")

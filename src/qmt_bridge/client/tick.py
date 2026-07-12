@@ -30,12 +30,15 @@ class TickMixin:
         Returns:
             L2 行情快照数据字典
         """
-        resp = self._get("/api/tick/l2_quote", {
-            "stock": stock,
-            "start_time": start_time,
-            "end_time": end_time,
-            "count": count,
-        })
+        resp = self._get(
+            "/api/tick/l2_quote",
+            {
+                "stock": stock,
+                "start_time": start_time,
+                "end_time": end_time,
+                "count": count,
+            },
+        )
         return resp.get("data", {})
 
     def get_l2_order(
@@ -55,12 +58,15 @@ class TickMixin:
         Returns:
             逐笔委托数据字典
         """
-        resp = self._get("/api/tick/l2_order", {
-            "stock": stock,
-            "start_time": start_time,
-            "end_time": end_time,
-            "count": count,
-        })
+        resp = self._get(
+            "/api/tick/l2_order",
+            {
+                "stock": stock,
+                "start_time": start_time,
+                "end_time": end_time,
+                "count": count,
+            },
+        )
         return resp.get("data", {})
 
     def get_l2_transaction(
@@ -80,12 +86,15 @@ class TickMixin:
         Returns:
             逐笔成交数据字典
         """
-        resp = self._get("/api/tick/l2_transaction", {
-            "stock": stock,
-            "start_time": start_time,
-            "end_time": end_time,
-            "count": count,
-        })
+        resp = self._get(
+            "/api/tick/l2_transaction",
+            {
+                "stock": stock,
+                "start_time": start_time,
+                "end_time": end_time,
+                "count": count,
+            },
+        )
         return resp.get("data", {})
 
     def get_l2_thousand_quote(
@@ -105,12 +114,15 @@ class TickMixin:
         Returns:
             千档行情数据字典
         """
-        resp = self._get("/api/tick/l2_thousand_quote", {
-            "stock": stock,
-            "start_time": start_time,
-            "end_time": end_time,
-            "count": count,
-        })
+        resp = self._get(
+            "/api/tick/l2_thousand_quote",
+            {
+                "stock": stock,
+                "start_time": start_time,
+                "end_time": end_time,
+                "count": count,
+            },
+        )
         return resp.get("data", {})
 
     def get_l2_thousand_orderbook(
@@ -130,12 +142,15 @@ class TickMixin:
         Returns:
             千档委托簿数据字典
         """
-        resp = self._get("/api/tick/l2_thousand_orderbook", {
-            "stock": stock,
-            "start_time": start_time,
-            "end_time": end_time,
-            "count": count,
-        })
+        resp = self._get(
+            "/api/tick/l2_thousand_orderbook",
+            {
+                "stock": stock,
+                "start_time": start_time,
+                "end_time": end_time,
+                "count": count,
+            },
+        )
         return resp.get("data", {})
 
     def get_l2_thousand_trade(
@@ -155,12 +170,15 @@ class TickMixin:
         Returns:
             千档成交数据字典
         """
-        resp = self._get("/api/tick/l2_thousand_trade", {
-            "stock": stock,
-            "start_time": start_time,
-            "end_time": end_time,
-            "count": count,
-        })
+        resp = self._get(
+            "/api/tick/l2_thousand_trade",
+            {
+                "stock": stock,
+                "start_time": start_time,
+                "end_time": end_time,
+                "count": count,
+            },
+        )
         return resp.get("data", {})
 
     def get_l2_thousand_queue(self, stock: str) -> dict:

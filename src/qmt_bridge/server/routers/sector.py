@@ -43,7 +43,10 @@ def get_sector_list():
 
 @router.get("/stocks")
 def get_sector_stocks(
-    sector: str = Query(..., description="板块名称，如 沪深A股 / 上证A股 / 深证A股 / 沪深ETF / 上证50 / 沪深300"),
+    sector: str = Query(
+        ...,
+        description="板块名称，如 沪深A股 / 上证A股 / 深证A股 / 沪深ETF / 上证50 / 沪深300",
+    ),
     real_timetag: int = Query(-1, description="历史日期时间戳（毫秒），-1 表示最新"),
 ):
     """获取指定板块的成分股列表。
