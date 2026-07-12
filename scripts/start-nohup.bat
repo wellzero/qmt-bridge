@@ -17,6 +17,10 @@ if exist "%PID_FILE%" (
 
 echo [QMT Bridge] 启动服务 (后台模式)...
 
+REM 启用模拟交易模块
+set "QMT_BRIDGE_PAPER_TRADING_ENABLED=true"
+set "QMT_BRIDGE_PAPER=true"
+
 REM 使用 PowerShell 以隐藏窗口方式启动进程
 powershell -NoProfile -Command ^
   "$p = Start-Process -FilePath qmt-server -ArgumentList '%*' ^

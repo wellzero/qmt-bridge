@@ -89,12 +89,16 @@ class PaperQuantTrader:
 
     def _load_accounts(self) -> None:
         """从配置管理器加载所有账户状态。"""
+        loaded = 0
         for account_id in self._config_manager.list_accounts():
             config = self._config_manager.get_config(account_id)
             if config is not None and config.enabled:
                 self._accounts[account_id] = self._config_manager.create_account_state(
                     config
                 )
+                loaded += 1
+        if loaded:
+            logger.info("已从配置加载 %d 个模拟账户", loaded)
 
     def _resolve_account_id(self, account: PaperAccount | Any) -> str:
         """从账户对象中提取 account_id。"""
@@ -104,6 +108,7 @@ class PaperQuantTrader:
         """获取账户状态，不存在则自动创建默认账户。"""
         with self._lock:
             if account_id not in self._accounts:
+                logger.info("自动创建模拟账户状态: %s", account_id)
                 config = self._config_manager.get_config(account_id)
                 if config is None:
                     config = PaperAccountConfig(account_id=account_id)
@@ -117,6 +122,7 @@ class PaperQuantTrader:
         """获取账户配置，不存在则创建默认配置。"""
         config = self._config_manager.get_config(account_id)
         if config is None:
+            logger.info("自动创建默认模拟账户配置: %s", account_id)
             config = PaperAccountConfig(account_id=account_id)
             self._config_manager.set_config(config)
         return config
@@ -137,6 +143,12 @@ class PaperQuantTrader:
             self._engine.price_source = FallbackPriceSource(
                 static_source=StaticPriceSource(config.static_prices)
             )
+        logger.debug(
+            "账户 %s 使用价格源: %s, 静态价格数: %d",
+            config.account_id,
+            config.price_source,
+            len(config.static_prices),
+        )
 
     def _persist_orders(self, account_id: str) -> None:
         """将当前账户委托列表持久化到 CSV。"""
@@ -194,6 +206,13 @@ class PaperQuantTrader:
                 )
             summary.unrealized_pnl = round(unrealized, 4)
         self._storage.write_summary(summary)
+        logger.debug(
+            "账户 %s 业绩摘要已更新: total_asset=%.2f, total_pnl=%.2f, trades=%d",
+            account_id,
+            summary.total_asset,
+            summary.total_pnl,
+            summary.total_trades,
+        )
 
     def _dispatch_order_callback(self, order: OrderState) -> None:
         try:
@@ -314,6 +333,24 @@ class PaperQuantTrader:
             order_sysid=str(order_id),
         )
 
+        side = (
+            "买入"
+            if order_type == STOCK_BUY
+            else ("卖出" if order_type == STOCK_SELL else f"类型{order_type}")
+        )
+        logger.info(
+            "[%s] 下单 account=%s %s %s volume=%d price_type=%s price=%.3f strategy=%s remark=%s",
+            order.order_time,
+            account_id,
+            side,
+            stock_code,
+            order_volume,
+            price_type,
+            price,
+            strategy_name,
+            order_remark,
+        )
+
         with state._lock:
             state.orders[order_id] = order
 
@@ -324,8 +361,30 @@ class PaperQuantTrader:
         trade = self._engine.match(order, state, config)
         if trade is not None:
             trade.traded_id = self._next_seq()
+            logger.info(
+                "[%s] 成交 account=%s %s %s volume=%d price=%.3f amount=%.2f commission=%.2f status=%s",
+                trade.traded_time,
+                account_id,
+                side,
+                stock_code,
+                trade.traded_volume,
+                trade.traded_price,
+                trade.traded_amount,
+                trade.commission,
+                order.status_msg,
+            )
             self._dispatch_trade_callback(trade.to_xt_trade())
             self._update_summary(account_id)
+        else:
+            logger.warning(
+                "[%s] 委托未成/废单 account=%s order_id=%d %s %s reason=%s",
+                self._now(),
+                account_id,
+                order_id,
+                side,
+                stock_code,
+                order.status_msg,
+            )
 
         self._persist_orders(account_id)
         self._dispatch_order_callback(order)
@@ -375,16 +434,25 @@ class PaperQuantTrader:
         account_id = self._resolve_account_id(account)
         state = self._accounts.get(account_id)
         if state is None:
+            logger.warning("撤单失败: 账户 %s 不存在", account_id)
             return -1
         with state._lock:
             order = state.orders.get(order_id)
             if order is None:
+                logger.warning("撤单失败: 账户 %s 委托 %d 不存在", account_id, order_id)
                 return -1
             if order.order_status not in (
                 ORDER_REPORTED,
                 ORDER_PARTSUCC_CANCEL,
                 ORDER_REPORTED_CANCEL,
             ):
+                logger.warning(
+                    "撤单失败: 账户 %s 委托 %d 状态为 %d (%s)，不可撤",
+                    account_id,
+                    order_id,
+                    order.order_status,
+                    order.status_msg,
+                )
                 return -1
             order.order_status = ORDER_CANCELED
             order.status_msg = "已撤"
@@ -398,6 +466,9 @@ class PaperQuantTrader:
                     position.frozen_volume -= order.remain_volume
                     position.can_use_volume += order.remain_volume
 
+        logger.info(
+            "撤单成功: 账户 %s 委托 %d %s", account_id, order_id, order.stock_code
+        )
         self._persist_orders(account_id)
         self._dispatch_order_callback(order)
         self._dispatch_asset_callback(account_id)
@@ -934,18 +1005,26 @@ class PaperQuantTrader:
         with self._lock:
             self._accounts[config.account_id] = state
         self._update_summary(config.account_id)
+        logger.info(
+            "模拟账户已创建/更新: %s, initial_cash=%.2f, price_source=%s",
+            config.account_id,
+            config.initial_cash,
+            config.price_source,
+        )
         return state
 
     def reset_account(self, account_id: str) -> bool:
         """重置指定账户。"""
         config = self._config_manager.get_config(account_id)
         if config is None:
+            logger.warning("重置失败: 模拟账户 %s 不存在", account_id)
             return False
         state = self._config_manager.create_account_state(config)
         with self._lock:
             self._accounts[account_id] = state
         self._storage.remove_account_files(account_id)
         self._update_summary(account_id)
+        logger.info("模拟账户已重置: %s", account_id)
         return True
 
     def delete_account(self, account_id: str) -> bool:
@@ -954,6 +1033,7 @@ class PaperQuantTrader:
             self._accounts.pop(account_id, None)
         self._config_manager.delete_config(account_id)
         self._storage.remove_account_files(account_id)
+        logger.info("模拟账户已删除: %s", account_id)
         return True
 
     def get_summary(self, account_id: str) -> AccountSummary:

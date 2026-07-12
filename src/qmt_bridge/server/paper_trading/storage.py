@@ -142,6 +142,7 @@ class PaperTradingStorage:
 
     def write_config(self, config: dict[str, Any]) -> None:
         self._write_json(self.config_path, config)
+        logger.debug("模拟交易配置已写入: %s", self.config_path)
 
     # ── 委托 CSV ──
 
@@ -197,6 +198,9 @@ class PaperTradingStorage:
                     writer.writerow({k: order.get(k, "") for k in ORDERS_HEADER})
                 tmp_path = Path(tmp.name)
             os.replace(tmp_path, path)
+            logger.debug(
+                "账户 %s 委托 CSV 已写入: %s (rows=%d)", account_id, path, len(orders)
+            )
         except Exception:
             logger.exception("写入委托 CSV 失败: %s", path)
 
@@ -221,6 +225,12 @@ class PaperTradingStorage:
 
     def write_summary(self, summary: AccountSummary) -> None:
         self._write_json(self.summary_path(summary.account_id), summary.to_dict())
+        logger.debug(
+            "账户 %s 业绩摘要已写入: total_asset=%.2f total_pnl=%.2f",
+            summary.account_id,
+            summary.total_asset,
+            summary.total_pnl,
+        )
 
     # ── 通用 JSON 原子写 ──
 
@@ -247,11 +257,13 @@ class PaperTradingStorage:
         ]:
             try:
                 path.unlink(missing_ok=True)
+                logger.debug("已删除账户 %s 文件: %s", account_id, path)
             except Exception:
                 logger.exception("删除文件失败: %s", path)
         # 尝试删除空账户目录
         try:
             if account_dir.exists() and not any(account_dir.iterdir()):
                 account_dir.rmdir()
+                logger.debug("已删除空账户目录: %s", account_dir)
         except Exception:
             logger.exception("删除账户目录失败: %s", account_dir)

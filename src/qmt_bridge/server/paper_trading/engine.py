@@ -201,14 +201,27 @@ class MatchingEngine:
         """
         if order.price_type == FIX_PRICE and order.price > 0:
             base_price = order.price
+            logger.debug(
+                "%s 限价单使用委托价 %.3f 作为基准价", order.stock_code, base_price
+            )
         else:
             base_price = self.price_source.get_price(order.stock_code)
+            logger.debug("%s 从价格源获取基准价: %s", order.stock_code, base_price)
             if base_price is None:
                 return None
 
         if order.order_type == STOCK_BUY:
-            return round(base_price * (1 + config.slippage), 4)
-        return round(base_price * (1 - config.slippage), 4)
+            fill_price = round(base_price * (1 + config.slippage), 4)
+        else:
+            fill_price = round(base_price * (1 - config.slippage), 4)
+        if config.slippage:
+            logger.debug(
+                "%s 应用滑点 %.4f 后成交价 %.3f",
+                order.stock_code,
+                config.slippage,
+                fill_price,
+            )
+        return fill_price
 
     def match(
         self,
@@ -233,6 +246,12 @@ class MatchingEngine:
         if fill_price is None or fill_price <= 0:
             order.order_status = ORDER_JUNK
             order.status_msg = "无法获取有效成交价格"
+            logger.warning(
+                "撮合失败 %s: 无法获取有效成交价格 (price_type=%s, price=%s)",
+                order.stock_code,
+                order.price_type,
+                order.price,
+            )
             return None
 
         volume = order.order_volume
@@ -251,13 +270,32 @@ class MatchingEngine:
                 if account.cash < total_cost:
                     order.order_status = ORDER_JUNK
                     order.status_msg = "可用资金不足"
+                    logger.warning(
+                        "撮合失败 %s: 资金不足 need=%.2f cash=%.2f",
+                        order.stock_code,
+                        total_cost,
+                        account.cash,
+                    )
                     return None
                 account.cash -= total_cost
+                logger.debug(
+                    "买入扣减资金 %s: cost=%.2f commission=%.2f cash_left=%.2f",
+                    order.stock_code,
+                    traded_amount,
+                    commission,
+                    account.cash,
+                )
             elif order.order_type == STOCK_SELL:
                 position = account.get_position(order.stock_code)
                 if position is None or position.can_use_volume < volume:
                     order.order_status = ORDER_JUNK
                     order.status_msg = "可用持仓不足"
+                    logger.warning(
+                        "撮合失败 %s: 持仓不足 need=%d have=%s",
+                        order.stock_code,
+                        volume,
+                        position.can_use_volume if position else 0,
+                    )
                     return None
                 old_avg_price = position.avg_price
                 position.can_use_volume -= volume
@@ -268,9 +306,23 @@ class MatchingEngine:
                 realized_pnl = (
                     traded_amount - volume * old_avg_price - commission - stamp_tax
                 )
+                logger.debug(
+                    "卖出增加资金 %s: amount=%.2f commission=%.2f tax=%.2f pnl=%.2f cash=%.2f",
+                    order.stock_code,
+                    traded_amount,
+                    commission,
+                    stamp_tax,
+                    realized_pnl,
+                    account.cash,
+                )
             else:
                 order.order_status = ORDER_JUNK
                 order.status_msg = "不支持的委托类型"
+                logger.warning(
+                    "撮合失败 %s: 不支持的委托类型 %s",
+                    order.stock_code,
+                    order.order_type,
+                )
                 return None
 
             # 更新买入后的持仓
@@ -318,3 +370,9 @@ class MatchingEngine:
                 price = self.price_source.get_price(position.stock_code)
                 if price is not None and price > 0:
                     position.last_price = round(price, 4)
+                    logger.debug(
+                        "刷新持仓价格 %s: last_price=%.3f market_value=%.2f",
+                        position.stock_code,
+                        position.last_price,
+                        position.market_value,
+                    )

@@ -66,6 +66,7 @@ class PaperTraderManager:
         if self._trader is not None:
             try:
                 self._trader.stop()
+                logger.info("PaperQuantTrader disconnected")
             except Exception:
                 logger.exception("Error stopping PaperQuantTrader")
             self._trader = None
@@ -86,6 +87,7 @@ class PaperTraderManager:
         if self._trader is None:
             raise RuntimeError("PaperQuantTrader is not connected")
         self._trader.create_account(config)
+        logger.info("模拟账户配置已创建/更新: %s", config.account_id)
         return config
 
     def get_account_config(self, account_id: str) -> PaperAccountConfig | None:
@@ -105,12 +107,18 @@ class PaperTraderManager:
     def reset_account(self, account_id: str) -> bool:
         if self._trader is None:
             return False
-        return self._trader.reset_account(account_id)
+        result = self._trader.reset_account(account_id)
+        if result:
+            logger.info("模拟账户已重置: %s", account_id)
+        return result
 
     def delete_account(self, account_id: str) -> bool:
         if self._trader is None:
             return False
-        return self._trader.delete_account(account_id)
+        result = self._trader.delete_account(account_id)
+        if result:
+            logger.info("模拟账户已删除: %s", account_id)
+        return result
 
     def download_prices(
         self, account_id: str, stock_codes: list[str]
@@ -141,6 +149,14 @@ class PaperTraderManager:
         if downloaded:
             config.static_prices = source.prices
             self._trader._config_manager.set_config(config)
+            logger.info(
+                "账户 %s 已下载 %d 只静态价格: %s",
+                account_id,
+                len(downloaded),
+                ", ".join(downloaded.keys()),
+            )
+        else:
+            logger.warning("账户 %s 未下载到任何静态价格", account_id)
         return downloaded
 
     def get_summary(self, account_id: str = "") -> AccountSummary | None:
@@ -172,6 +188,16 @@ class PaperTraderManager:
         if self._trader is None:
             raise RuntimeError("PaperQuantTrader is not connected")
         account = self._resolve_account(account_id)
+        logger.debug(
+            "Manager 下单: account=%s %s %s volume=%d price=%.3f",
+            account.account_id,
+            "买入"
+            if order_type == 23
+            else ("卖出" if order_type == 24 else f"类型{order_type}"),
+            stock_code,
+            order_volume,
+            price,
+        )
         return self._trader.order_stock(
             account,
             stock_code,
@@ -212,6 +238,9 @@ class PaperTraderManager:
         if self._trader is None:
             raise RuntimeError("PaperQuantTrader is not connected")
         account = self._resolve_account(account_id)
+        logger.debug(
+            "Manager 撤单: account=%s order_id=%d", account.account_id, order_id
+        )
         return self._trader.cancel_order_stock(account, order_id)
 
     def cancel_order_async(self, order_id: int, account_id: str = "") -> int:
@@ -242,7 +271,16 @@ class PaperTraderManager:
         if self._trader is None:
             return None
         account = self._resolve_account(account_id)
-        return self._trader.query_stock_asset(account)
+        result = self._trader.query_stock_asset(account)
+        if result is not None:
+            logger.debug(
+                "查询资产 account=%s: cash=%.2f market_value=%.2f total_asset=%.2f",
+                account.account_id,
+                result.cash,
+                result.market_value,
+                result.total_asset,
+            )
+        return result
 
     def query_trades(self, account_id: str = "") -> list[Any]:
         if self._trader is None:
