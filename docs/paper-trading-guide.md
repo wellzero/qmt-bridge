@@ -312,8 +312,22 @@ export QMT_BRIDGE_TRADING_ACCOUNT_ID=blue_chip_paper
 export QMT_BRIDGE_PAPER=true
 export IS_BACKTESTING=false
 
-python /home/claude/quant_free_trading/cn_strategy/blue_chip_multi_factor_rotation/backtest/blue_chip_multi_factor_rotation_backup.py
+python /home/claude/quant_free_trading/cn_strategy/blue_chip_multi_factor_rotation/backtest/blue_chip_multi_factor_rotation.py
 ```
+
+> **注意 `.env` 加载顺序**
+> 部分策略文件顶部会显式调用 `load_dotenv(..., override=True)` 加载 lumibot 包目录下的 `.env`，
+> 导致策略目录下自己的 `.env` 被覆盖。若发现 `QMT_BRIDGE_PAPER=true` 未生效，
+> 请把策略顶部的 `load_dotenv` 改为优先加载策略目录自身的 `.env`，并不覆盖已存在的环境变量：
+>
+> ```python
+> from pathlib import Path
+> from dotenv import load_dotenv
+>
+> strategy_env_path = Path(__file__).resolve().parent / ".env"
+> if strategy_env_path.exists():
+>     load_dotenv(strategy_env_path)  # 不覆盖 shell 已设置变量
+> ```
 
 ### 多策略并发运行
 
