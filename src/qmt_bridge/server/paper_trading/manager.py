@@ -77,6 +77,18 @@ class PaperTraderManager:
         target = account_id or self.default_account_id
         return PaperAccount(target)
 
+    def _ensure_account(self, account_id: str = "") -> None:
+        """如果账户不存在，自动创建并持久化到配置。
+
+        用于客户端首次连接或首次查询时，让账户立即在 config.json 中可见。
+        """
+        if self._trader is None:
+            return
+        target = account_id or self.default_account_id
+        if not target:
+            return
+        self._trader._get_account(target)
+
     # ------------------------------------------------------------------
     # 账户配置管理
     # ------------------------------------------------------------------
@@ -188,6 +200,7 @@ class PaperTraderManager:
     ) -> int:
         if self._trader is None:
             raise RuntimeError("PaperQuantTrader is not connected")
+        self._ensure_account(account_id)
         account = self._resolve_account(account_id)
         logger.debug(
             "Manager 下单: account=%s %s %s volume=%d price=%.3f",
@@ -223,6 +236,7 @@ class PaperTraderManager:
     ) -> int:
         if self._trader is None:
             raise RuntimeError("PaperQuantTrader is not connected")
+        self._ensure_account(account_id)
         account = self._resolve_account(account_id)
         return self._trader.order_stock_async(
             account,
@@ -238,6 +252,7 @@ class PaperTraderManager:
     def cancel_order(self, order_id: int, account_id: str = "") -> int:
         if self._trader is None:
             raise RuntimeError("PaperQuantTrader is not connected")
+        self._ensure_account(account_id)
         account = self._resolve_account(account_id)
         logger.debug(
             "Manager 撤单: account=%s order_id=%d", account.account_id, order_id
@@ -247,6 +262,7 @@ class PaperTraderManager:
     def cancel_order_async(self, order_id: int, account_id: str = "") -> int:
         if self._trader is None:
             raise RuntimeError("PaperQuantTrader is not connected")
+        self._ensure_account(account_id)
         account = self._resolve_account(account_id)
         return self._trader.cancel_order_stock_async(account, order_id)
 
@@ -259,18 +275,21 @@ class PaperTraderManager:
     ) -> list[Any]:
         if self._trader is None:
             return []
+        self._ensure_account(account_id)
         account = self._resolve_account(account_id)
         return self._trader.query_stock_orders(account, cancelable_only)
 
     def query_positions(self, account_id: str = "") -> list[Any]:
         if self._trader is None:
             return []
+        self._ensure_account(account_id)
         account = self._resolve_account(account_id)
         return self._trader.query_stock_positions(account)
 
     def query_asset(self, account_id: str = "") -> Any:
         if self._trader is None:
             return None
+        self._ensure_account(account_id)
         account = self._resolve_account(account_id)
         result = self._trader.query_stock_asset(account)
         if result is not None:
@@ -286,18 +305,21 @@ class PaperTraderManager:
     def query_trades(self, account_id: str = "") -> list[Any]:
         if self._trader is None:
             return []
+        self._ensure_account(account_id)
         account = self._resolve_account(account_id)
         return self._trader.query_stock_trades(account)
 
     def query_order_detail(self, order_id: int = 0, account_id: str = "") -> Any:
         if self._trader is None:
             return None
+        self._ensure_account(account_id)
         account = self._resolve_account(account_id)
         return self._trader.query_stock_order(account, order_id)
 
     def query_single_position(self, stock_code: str, account_id: str = "") -> Any:
         if self._trader is None:
             return None
+        self._ensure_account(account_id)
         account = self._resolve_account(account_id)
         return self._trader.query_stock_position(account, stock_code)
 
