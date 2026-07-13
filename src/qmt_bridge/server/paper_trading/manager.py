@@ -50,6 +50,7 @@ class PaperTraderManager:
         self._trader._config_manager._storage = storage
         self._trader._config_manager._load()
         self._trader._load_accounts()
+        self._trader._sync_accounts_from_storage()
 
         if self.default_account_id:
             self._account = PaperAccount(self.default_account_id)

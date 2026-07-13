@@ -100,6 +100,46 @@ class PaperQuantTrader:
         if loaded:
             logger.info("已从配置加载 %d 个模拟账户", loaded)
 
+    def _sync_accounts_from_storage(self) -> None:
+        """扫描数据目录，为有业绩文件但配置缺失的账户自动重建配置。
+
+        这种场景通常发生在 ``config.json`` 被覆盖/还原，而账户目录仍保留时。
+        """
+        if self._storage is None:
+            return
+        root = self._storage.paper_trading_dir
+        if not root.exists():
+            return
+
+        synced = 0
+        existing = set(self._config_manager.list_accounts())
+        for path in root.iterdir():
+            if not path.is_dir():
+                continue
+            account_id = path.name
+            summary_path = path / "summary" / "summary.json"
+            if not summary_path.exists():
+                continue
+            if account_id in existing:
+                continue
+            try:
+                summary = self._storage.read_summary(account_id)
+                config = PaperAccountConfig(
+                    account_id=account_id,
+                    initial_cash=summary.initial_cash,
+                )
+                self._config_manager.set_config(config)
+                self._accounts[account_id] = self._config_manager.create_account_state(
+                    config
+                )
+                self._update_summary(account_id)
+                synced += 1
+                logger.info("从磁盘自动恢复模拟账户配置: %s", account_id)
+            except Exception:
+                logger.exception("自动恢复模拟账户 %s 配置失败", account_id)
+        if synced:
+            logger.info("已从磁盘自动恢复 %d 个模拟账户配置", synced)
+
     def _resolve_account_id(self, account: PaperAccount | Any) -> str:
         """从账户对象中提取 account_id。"""
         return getattr(account, "account_id", "")
