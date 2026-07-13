@@ -229,6 +229,19 @@ class TradingMixin:
             f"{self._trading_prefix}/account_status", {"account_id": account_id}
         )
 
+    def get_paper_account_status(self, account_id: str = "") -> dict:
+        """获取模拟账户连接与存在状态（启动/心跳检查）。
+
+        Args:
+            account_id: 模拟账户 ID
+
+        Returns:
+            包含 server_connected、account_exists、account_subscribed 的字典
+        """
+        return self._get(
+            "/api/paper_trading/account_status", {"account_id": account_id}
+        )
+
     def query_account_status_detail(self) -> dict:
         """查询账户状态详情。
 

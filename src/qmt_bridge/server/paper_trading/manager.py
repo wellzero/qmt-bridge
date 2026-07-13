@@ -323,8 +323,22 @@ class PaperTraderManager:
         account = self._resolve_account(account_id)
         return self._trader.query_stock_position(account, stock_code)
 
-    def get_account_status(self, account_id: str = "") -> dict[str, bool]:
-        return {"connected": self._trader is not None}
+    def get_account_status(self, account_id: str = "") -> dict[str, Any]:
+        """获取模拟账户连接与存在状态（供心跳/启动检查使用）。"""
+        if self._trader is None:
+            return {
+                "server_connected": False,
+                "account_id": account_id or self.default_account_id,
+                "account_exists": False,
+                "account_subscribed": False,
+            }
+        target = account_id or self.default_account_id
+        return {
+            "server_connected": True,
+            "account_id": target,
+            "account_exists": target in self._trader._accounts,
+            "account_subscribed": target in self._trader._subscribed,
+        }
 
     def query_account_infos(self) -> list[Any]:
         if self._trader is None:
