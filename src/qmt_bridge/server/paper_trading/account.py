@@ -91,6 +91,8 @@ class OrderState:
     status_msg: str = ""
     traded_volume: int = 0
     traded_price: float = 0.0  # 成交均价
+    commission: float = 0.0  # 手续费
+    stamp_tax: float = 0.0  # 印花税
     order_sysid: str = ""
 
     @property
@@ -116,6 +118,8 @@ class OrderState:
             status_msg=self.status_msg,
             strategy_name=self.strategy_name,
             order_remark=self.order_remark,
+            commission=self.commission,
+            stamp_tax=self.stamp_tax,
             direction=0,
             offset_flag=0,
             secu_account="",

@@ -246,6 +246,8 @@ class PaperQuantTrader:
                         "price": xt.price,
                         "traded_volume": xt.traded_volume,
                         "traded_price": xt.traded_price,
+                        "commission": xt.commission,
+                        "stamp_tax": xt.stamp_tax,
                         "order_status": xt.order_status,
                         "status_msg": xt.status_msg,
                         "strategy_name": xt.strategy_name,

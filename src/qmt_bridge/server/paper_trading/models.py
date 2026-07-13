@@ -59,6 +59,8 @@ class XtOrder:
         offset_flag: int = 0,
         secu_account: str = "",
         instrument_name: str = "",
+        commission: float = 0.0,
+        stamp_tax: float = 0.0,
     ):
         self.account_type = SECURITY_ACCOUNT
         self.account_id = account_id
@@ -80,6 +82,8 @@ class XtOrder:
         self.offset_flag = offset_flag
         self.secu_account = secu_account
         self.instrument_name = instrument_name
+        self.commission = commission
+        self.stamp_tax = stamp_tax
 
 
 class XtTrade:

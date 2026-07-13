@@ -28,6 +28,8 @@ ORDERS_HEADER = [
     "price",
     "traded_volume",
     "traded_price",
+    "commission",
+    "stamp_tax",
     "order_status",
     "status_msg",
     "strategy_name",

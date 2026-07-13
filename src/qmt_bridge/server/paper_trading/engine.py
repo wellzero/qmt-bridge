@@ -341,6 +341,8 @@ class MatchingEngine:
             # 更新委托状态为已成
             order.traded_volume = volume
             order.traded_price = fill_price
+            order.commission = commission
+            order.stamp_tax = stamp_tax
             order.order_status = ORDER_SUCCEEDED
             order.status_msg = "已成"
 
