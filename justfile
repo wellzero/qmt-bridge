@@ -79,6 +79,10 @@ download-5m *ARGS:
 download-5m-recent *ARGS:
     python scripts/download_all.py --periods 5m --skip-financial --since 2025 {{ARGS}}
 
+# 为模拟交易账户下载静态价格（支持 --strategy 或 --stock-codes）
+download-paper-prices *ARGS:
+    python scripts/download_paper_prices.py {{ARGS}}
+
 # ─────────────────────────── 仪表盘 ─────────────────────────
 
 # 启动可视化仪表盘（http://localhost:8501）
