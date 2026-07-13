@@ -32,6 +32,10 @@ class PaperAccountConfig(BaseModel):
     static_prices: dict[str, float] = Field(
         default_factory=dict, description="静态价格表"
     )
+    auto_download_prices: bool = Field(
+        default=True,
+        description="价格缺失时是否自动尝试从 xtquant 下载静态价格",
+    )
     partial_fill_enabled: bool = Field(
         default=False, description="是否启用部分成交模拟"
     )

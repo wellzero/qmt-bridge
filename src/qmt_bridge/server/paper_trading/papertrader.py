@@ -150,6 +150,42 @@ class PaperQuantTrader:
             len(config.static_prices),
         )
 
+    def _try_auto_download_price(
+        self,
+        account_id: str,
+        stock_code: str,
+        config: PaperAccountConfig,
+    ) -> bool:
+        """当配置允许且价格缺失时，尝试从 xtquant 下载单只股票静态价格。
+
+        下载成功后会更新账户配置并持久化。
+
+        Returns:
+            是否成功下载到有效价格。
+        """
+        if not config.auto_download_prices:
+            return False
+        if config.price_source not in ("static", "fallback"):
+            return False
+        try:
+            source = StaticPriceSource(config.static_prices)
+            downloaded = source.download_prices([stock_code])
+            price = downloaded.get(stock_code)
+            if price is None:
+                return False
+            config.static_prices[stock_code] = price
+            self._config_manager.set_config(config)
+            logger.info(
+                "账户 %s 自动下载 %s 静态价格成功: %.3f",
+                account_id,
+                stock_code,
+                price,
+            )
+            return True
+        except Exception:
+            logger.exception("账户 %s 自动下载 %s 静态价格失败", account_id, stock_code)
+            return False
+
     def _persist_orders(self, account_id: str) -> None:
         """将当前账户委托列表持久化到 CSV。"""
         state = self._accounts.get(account_id)
@@ -358,6 +394,15 @@ class PaperQuantTrader:
         self._dispatch_order_callback(order)
 
         self._set_price_source(config)
+        if config.auto_download_prices and config.price_source in (
+            "static",
+            "fallback",
+        ):
+            current_price = self._engine.price_source.get_price(stock_code)
+            if current_price is None:
+                if self._try_auto_download_price(account_id, stock_code, config):
+                    self._set_price_source(config)
+
         trade = self._engine.match(order, state, config)
         if trade is not None:
             trade.traded_id = self._next_seq()
