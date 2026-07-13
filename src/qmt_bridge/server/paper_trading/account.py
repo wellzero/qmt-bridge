@@ -93,6 +93,8 @@ class OrderState:
     traded_price: float = 0.0  # 成交均价
     commission: float = 0.0  # 手续费
     stamp_tax: float = 0.0  # 印花税
+    account_cash: float = 0.0  # 下单后账户可用资金
+    account_market_value: float = 0.0  # 下单后账户持仓市值
     order_sysid: str = ""
 
     @property

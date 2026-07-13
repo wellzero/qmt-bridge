@@ -248,6 +248,8 @@ class PaperQuantTrader:
                         "traded_price": xt.traded_price,
                         "commission": xt.commission,
                         "stamp_tax": xt.stamp_tax,
+                        "account_cash": order.account_cash,
+                        "account_market_value": order.account_market_value,
                         "order_status": xt.order_status,
                         "status_msg": xt.status_msg,
                         "strategy_name": xt.strategy_name,
@@ -462,6 +464,8 @@ class PaperQuantTrader:
             )
             self._dispatch_trade_callback(trade.to_xt_trade())
             self._update_summary(account_id)
+            order.account_cash = state.cash
+            order.account_market_value = state.market_value
         else:
             logger.warning(
                 "[%s] 委托未成/废单 account=%s order_id=%d %s %s reason=%s",
@@ -472,6 +476,8 @@ class PaperQuantTrader:
                 stock_code,
                 order.status_msg,
             )
+            order.account_cash = state.cash
+            order.account_market_value = state.market_value
 
         self._persist_orders(account_id)
         self._dispatch_order_callback(order)
