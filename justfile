@@ -89,6 +89,10 @@ download-paper-prices *ARGS:
 dashboard:
     streamlit run dashboard/app.py
 
+# 启动模拟交易结果仪表盘（http://localhost:8501）
+paper-dashboard:
+    streamlit run dashboard/paper-trading/app.py
+
 # ─────────────────────────── 文档 ───────────────────────────
 
 # 本地预览 MkDocs 文档站点（http://127.0.0.1:8001）
