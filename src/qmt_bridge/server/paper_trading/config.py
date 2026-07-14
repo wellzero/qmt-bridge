@@ -24,6 +24,9 @@ class PaperAccountConfig(BaseModel):
     account_type: int = Field(default=2, description="账户类型：2 普通股票，3 信用")
     initial_cash: float = Field(default=1_000_000.0, description="初始资金")
     commission_rate: float = Field(default=0.0003, description="手续费率")
+    min_commission: float = Field(
+        default=5.0, description="单笔最低手续费，不足按此收取"
+    )
     stamp_tax_rate: float = Field(default=0.0005, description="印花税率，仅卖出收取")
     slippage: float = Field(default=0.0, description="滑点比例")
     price_source: str = Field(

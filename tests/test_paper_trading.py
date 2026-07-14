@@ -56,6 +56,7 @@ def test_create_account_and_trade(trader: PaperQuantTrader, temp_data_dir: Path)
         price_source="static",
         static_prices={"000001.SZ": 10.0},
         commission_rate=0.0,
+        min_commission=0.0,
         stamp_tax_rate=0.0,
     )
     trader.create_account(config)
@@ -104,6 +105,7 @@ def test_sell_stock_and_summary(trader: PaperQuantTrader, temp_data_dir: Path):
         price_source="static",
         static_prices={"000001.SZ": 10.0},
         commission_rate=0.0,
+        min_commission=0.0,
         stamp_tax_rate=0.0,
     )
     trader.create_account(config)
@@ -146,6 +148,7 @@ def test_multi_account_isolation(trader: PaperQuantTrader, temp_data_dir: Path):
             price_source="static",
             static_prices={"000001.SZ": 10.0},
             commission_rate=0.0,
+            min_commission=0.0,
             stamp_tax_rate=0.0,
         )
         trader.create_account(config)
@@ -173,6 +176,7 @@ def test_csv_order_logging(trader: PaperQuantTrader, temp_data_dir: Path):
         price_source="static",
         static_prices={"000001.SZ": 10.0},
         commission_rate=0.0,
+        min_commission=0.0,
         stamp_tax_rate=0.0,
     )
     trader.create_account(config)
@@ -203,6 +207,7 @@ def test_manager_lifecycle(temp_data_dir: Path):
         price_source="static",
         static_prices={"600519.SH": 1000.0},
         commission_rate=0.0,
+        min_commission=0.0,
         stamp_tax_rate=0.0,
     )
     manager.create_or_update_account(config)
@@ -260,6 +265,7 @@ def test_router_endpoints(temp_data_dir: Path):
             "price_source": "static",
             "static_prices": {"000001.SZ": 10.0},
             "commission_rate": 0.0,
+            "min_commission": 0.0,
             "stamp_tax_rate": 0.0,
         },
     )

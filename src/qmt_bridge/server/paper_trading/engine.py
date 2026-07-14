@@ -256,7 +256,10 @@ class MatchingEngine:
 
         volume = order.order_volume
         traded_amount = round(fill_price * volume, 4)
-        commission = round(traded_amount * config.commission_rate, 4)
+        commission = max(
+            round(traded_amount * config.commission_rate, 4),
+            config.min_commission,
+        )
         stamp_tax = round(
             traded_amount * config.stamp_tax_rate
             if order.order_type == STOCK_SELL
