@@ -33,10 +33,13 @@ def render_account_cards(summaries_df: pd.DataFrame) -> None:
         st.metric("总成交笔数", total_trades)
 
 
-def render_accounts_table(summaries_df: pd.DataFrame) -> None:
-    """渲染所有账户摘要表格。"""
+def render_accounts_table(summaries_df: pd.DataFrame, key: str = "accounts_table") -> str | None:
+    """渲染所有账户摘要表格，支持点击单行选择账户。
+
+    返回被选中行的 ``account_id``；未选择时返回 ``None``。
+    """
     if summaries_df.empty:
-        return
+        return None
 
     display_df = summaries_df.copy()
     rename_map = {
@@ -62,7 +65,19 @@ def render_accounts_table(summaries_df: pd.DataFrame) -> None:
             lambda x: f"{x * 100:.2f}%" if pd.notna(x) else "-"
         )
 
-    st.dataframe(display_df, use_container_width=True, hide_index=True)
+    event = st.dataframe(
+        display_df,
+        use_container_width=True,
+        hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row",
+        key=key,
+    )
+    selected = event.selection
+    if selected and selected.get("rows"):
+        row_idx = selected["rows"][0]
+        return str(summaries_df.iloc[row_idx]["account_id"])
+    return None
 
 
 def render_account_detail(
@@ -115,36 +130,70 @@ def render_account_detail(
             errors="coerce",
         )
         chart_df = orders_df.dropna(subset=["datetime"]).sort_values("datetime")
+        chart_df["total_asset"] = (
+            chart_df["account_cash"] + chart_df["account_market_value"]
+        )
+
+        def _order_hover_text(row: pd.Series) -> str:
+            """为每个委托点生成悬浮提示文本。"""
+            lines = [
+                f"时间: {row['datetime']:%Y-%m-%d %H:%M:%S}",
+                f"股票: {row.get('stock_code', '-')}",
+                f"方向: {row.get('order_type_label', '-')}",
+            ]
+            if pd.notna(row.get("order_volume")):
+                lines.append(f"委托量: {row['order_volume']}")
+            if pd.notna(row.get("traded_volume")):
+                lines.append(f"成交量: {row['traded_volume']}")
+            if pd.notna(row.get("traded_price")):
+                lines.append(f"成交价: {row['traded_price']:.3f}")
+            if pd.notna(row.get("commission")):
+                lines.append(f"手续费: {row['commission']:.2f}")
+            if pd.notna(row.get("stamp_tax")):
+                lines.append(f"印花税: {row['stamp_tax']:.2f}")
+            if row.get("status"):
+                lines.append(f"状态: {row['status']}")
+            lines.append(f"总资产: {row['total_asset']:.2f}")
+            return "<br>".join(lines)
+
+        chart_df["hover_text"] = chart_df.apply(_order_hover_text, axis=1)
 
         fig = go.Figure()
+
+        # 总资产曲线
         fig.add_trace(
             go.Scatter(
                 x=chart_df["datetime"],
-                y=chart_df["account_cash"],
-                mode="lines+markers",
-                name="可用资金",
-            )
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=chart_df["datetime"],
-                y=chart_df["account_market_value"],
-                mode="lines+markers",
-                name="持仓市值",
-            )
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=chart_df["datetime"],
-                y=chart_df["account_cash"] + chart_df["account_market_value"],
-                mode="lines+markers",
+                y=chart_df["total_asset"],
+                mode="lines",
                 name="总资产",
+                line=dict(color="#1f77b4", width=2),
+                hovertemplate="总资产: %{y:,.2f}<br>时间: %{x}<extra>资产</extra>",
             )
         )
+
+        # 委托标记点，悬浮显示委托详情
+        fig.add_trace(
+            go.Scatter(
+                x=chart_df["datetime"],
+                y=chart_df["total_asset"],
+                mode="markers",
+                name="委托",
+                marker=dict(
+                    size=10,
+                    color="#ff7f0e",
+                    symbol="diamond",
+                    line=dict(width=1, color="#ffffff"),
+                ),
+                hovertemplate="%{text}<extra>委托详情</extra>",
+                text=chart_df["hover_text"],
+            )
+        )
+
         fig.update_layout(
-            title="资产变化趋势",
-            xaxis_title="时间",
-            yaxis_title="金额",
+            title="总资产与委托时点（悬停查看委托详情）",
+            xaxis_title="日期时间",
+            yaxis_title="总资产",
             legend=dict(
                 orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
             ),
