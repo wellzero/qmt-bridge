@@ -83,6 +83,10 @@ download-5m-recent *ARGS:
 download-paper-prices *ARGS:
     python scripts/download_paper_prices.py {{ARGS}}
 
+# 诊断模拟交易账户在仪表盘中的可见性
+diagnose-paper-accounts *ARGS:
+    python scripts/diagnose_paper_accounts.py {{ARGS}}
+
 # ─────────────────────────── 仪表盘 ─────────────────────────
 
 # 启动可视化仪表盘（http://localhost:8501）
