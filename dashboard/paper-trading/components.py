@@ -263,6 +263,27 @@ def render_account_detail(
     if orders_df.empty:
         st.info("暂无委托记录。")
     else:
+        display_orders = orders_df.copy()
+        # 若已解析到价格，为每笔委托补充最新价与按最新价估算的盈亏
+        if live:
+            display_orders["current_price"] = display_orders["stock_code"].map(prices)
+            display_orders["current_price"] = display_orders["current_price"].fillna(
+                display_orders["traded_price"]
+            )
+
+            def _order_pnl(row: pd.Series) -> float:
+                """按最新价估算单笔委托盈亏：买入看多、卖出看空。"""
+                price = row.get("current_price")
+                trade_price = row.get("traded_price")
+                volume = row.get("traded_volume")
+                order_type = str(row.get("order_type", ""))
+                if pd.isna(price) or pd.isna(trade_price) or pd.isna(volume):
+                    return 0.0
+                direction = 1.0 if order_type == "23" else -1.0
+                return float((price - trade_price) * volume * direction)
+
+            display_orders["pnl"] = display_orders.apply(_order_pnl, axis=1)
+
         display_cols = [
             "trade_date",
             "order_time",
@@ -273,11 +294,13 @@ def render_account_detail(
             "price",
             "traded_volume",
             "traded_price",
+            "current_price",
+            "pnl",
             "commission",
             "stamp_tax",
             "status",
         ]
-        display_cols = [c for c in display_cols if c in orders_df.columns]
+        display_cols = [c for c in display_cols if c in display_orders.columns]
         rename = {
             "trade_date": "日期",
             "order_time": "时间",
@@ -288,12 +311,14 @@ def render_account_detail(
             "price": "委托价",
             "traded_volume": "成交量",
             "traded_price": "成交价",
+            "current_price": "最新价",
+            "pnl": "估算盈亏",
             "commission": "手续费",
             "stamp_tax": "印花税",
             "status": "状态",
         }
         st.dataframe(
-            orders_df[display_cols].rename(columns=rename),
+            display_orders[display_cols].rename(columns=rename),
             use_container_width=True,
             hide_index=True,
         )
