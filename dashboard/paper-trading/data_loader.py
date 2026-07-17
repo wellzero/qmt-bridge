@@ -166,25 +166,59 @@ def derive_positions(orders_df: pd.DataFrame) -> pd.DataFrame:
     if orders_df.empty or "stock_code" not in orders_df.columns:
         return pd.DataFrame()
 
+    positions = derive_positions_with_cost(orders_df)
+    if positions.empty:
+        return positions
+    return positions[
+        [
+            "stock_code",
+            "volume",
+            "traded_price",
+            "market_value",
+            "trade_date",
+            "order_time",
+        ]
+    ]
+
+
+def derive_positions_with_cost(orders_df: pd.DataFrame) -> pd.DataFrame:
+    """根据委托记录推导当前持仓，并计算成本均价与成本基数。
+
+    Returns:
+        DataFrame 列：``stock_code``、``volume``、``avg_cost``、``cost_basis``、
+        ``traded_price``、``market_value``、``trade_date``、``order_time``。
+    """
+    if orders_df.empty or "stock_code" not in orders_df.columns:
+        return pd.DataFrame()
+
     buy_mask = orders_df["order_type"].astype(str) == "23"
     sell_mask = orders_df["order_type"].astype(str) == "24"
 
-    buys = (
-        orders_df[buy_mask]
-        .groupby("stock_code")["traded_volume"]
-        .sum()
-        .rename("buy_volume")
+    buy_rows = orders_df[buy_mask].copy()
+    sell_rows = orders_df[sell_mask].copy()
+
+    # 买入成本与数量
+    buy_cost = (
+        buy_rows.assign(
+            cost=buy_rows["traded_volume"].fillna(0) * buy_rows["traded_price"].fillna(0)
+        )
+        .groupby("stock_code")
+        .agg({"traded_volume": "sum", "cost": "sum"})
+        .rename(columns={"traded_volume": "buy_volume", "cost": "buy_cost"})
     )
+
     sells = (
-        orders_df[sell_mask]
-        .groupby("stock_code")["traded_volume"]
+        sell_rows.groupby("stock_code")["traded_volume"]
         .sum()
         .rename("sell_volume")
     )
 
-    positions = pd.concat([buys, sells], axis=1).fillna(0)
+    positions = pd.concat([buy_cost, sells], axis=1).fillna(0)
     positions["volume"] = positions["buy_volume"] - positions["sell_volume"]
     positions = positions[positions["volume"] > 0].reset_index()
+
+    positions["avg_cost"] = (positions["buy_cost"] / positions["buy_volume"]).round(4)
+    positions["cost_basis"] = positions["avg_cost"] * positions["volume"]
 
     # 最近成交价作为参考市值
     latest = (
@@ -199,6 +233,8 @@ def derive_positions(orders_df: pd.DataFrame) -> pd.DataFrame:
         [
             "stock_code",
             "volume",
+            "avg_cost",
+            "cost_basis",
             "traded_price",
             "market_value",
             "trade_date",

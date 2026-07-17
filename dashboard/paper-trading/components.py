@@ -8,7 +8,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from data_loader import derive_positions, load_all_orders, load_summary
+from data_loader import load_all_orders, load_summary
+from pricing import calculate_live_pnl, is_trading_hours, resolve_prices
 
 
 def render_account_cards(summaries_df: pd.DataFrame) -> None:
@@ -102,6 +103,54 @@ def render_account_detail(
     with col5:
         rate = float(summary.get("total_return_rate", 0)) * 100
         st.metric("总收益率", f"{rate:.2f}%")
+
+    # ── 实时估算（当前价/收盘价）──────────────────────────────────────
+    initial_cash = float(account_config.get("initial_cash", summary.get("initial_cash", 100_000)))
+    live_positions_df = pd.DataFrame()
+    live = {}
+    if not orders_df.empty:
+        stock_codes = orders_df["stock_code"].dropna().unique().tolist()
+        prices = resolve_prices(data_dir, stock_codes, account_config)
+        live = calculate_live_pnl(orders_df, prices, initial_cash)
+        live_positions_df = live.get("positions", pd.DataFrame())
+
+    if live:
+        price_label = "盘中最新价" if is_trading_hours() else "收盘价"
+        st.markdown(f"#### 实时估算（基于 {price_label}）")
+        lc1, lc2, lc3, lc4, lc5 = st.columns(5)
+        with lc1:
+            st.metric("估算总资产", f"{live['total_asset']:,.2f}")
+        with lc2:
+            st.metric("可用资金", f"{live['cash']:,.2f}")
+        with lc3:
+            st.metric("持仓市值", f"{live['market_value']:,.2f}")
+        with lc4:
+            st.metric("估算总盈亏", f"{live['total_pnl']:,.2f}")
+        with lc5:
+            st.metric("估算收益率", f"{live['total_return_rate'] * 100:.2f}%")
+
+        if not live_positions_df.empty:
+            display_positions = live_positions_df.copy()
+            display_positions["current_price"] = display_positions["current_price"].fillna(
+                display_positions["traded_price"]
+            )
+            display_positions = display_positions.rename(
+                columns={
+                    "stock_code": "股票代码",
+                    "volume": "持仓量",
+                    "avg_cost": "成本均价",
+                    "current_price": "当前价",
+                    "market_value": "市值",
+                    "unrealized_pnl": "浮动盈亏",
+                    "trade_date": "最后交易日期",
+                    "order_time": "最后交易时间",
+                }
+            )
+            st.dataframe(display_positions, use_container_width=True, hide_index=True)
+        else:
+            st.info("当前无持仓。")
+    else:
+        st.info("暂无委托记录，无法估算实时盈亏。")
 
     # ── 配置信息 ────────────────────────────────────────────────────
     with st.expander("账户配置"):
@@ -244,21 +293,3 @@ def render_account_detail(
             use_container_width=True,
             hide_index=True,
         )
-
-    # ── 推导持仓 ────────────────────────────────────────────────────
-    st.markdown("#### 推导持仓（由委托记录计算，仅供参考）")
-    positions_df = derive_positions(orders_df)
-    if positions_df.empty:
-        st.info("暂无持仓。")
-    else:
-        positions_df = positions_df.rename(
-            columns={
-                "stock_code": "股票代码",
-                "volume": "持仓量",
-                "traded_price": "参考成交价",
-                "market_value": "参考市值",
-                "trade_date": "最后交易日期",
-                "order_time": "最后交易时间",
-            }
-        )
-        st.dataframe(positions_df, use_container_width=True, hide_index=True)

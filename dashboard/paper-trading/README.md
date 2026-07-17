@@ -61,6 +61,31 @@ just paper-dashboard
 
 > 账户切换方式：在「账户列表」表格中点击目标行即可；默认展示第一个账户。
 
+## 实时盈亏估算
+
+仪表盘支持基于**当前价/收盘价**的实时盈亏估算：
+
+- **交易时段**：读取 ``data/paper_trading/prices/current.json``，使用盘中最新价估算持仓市值与浮动盈亏。
+- **收盘后**：读取 ``data/paper_trading/prices/YYYYMMDD.json``，使用当日收盘价估算。
+- 价格源优先级：盘中最新价 → 当日收盘价 → 账户配置 ``static_prices`` → 最近成交价兜底。
+
+更新价格缓存的方式：
+
+```bash
+# 交易时段更新盘中最新价
+just update-paper-price-cache --host <qmt-server-host> --port 8083 --api-key <key>
+
+# 收盘后更新当日收盘价
+just update-paper-close-price --host <qmt-server-host> --port 8083 --api-key <key>
+```
+
+或直接用 Python：
+
+```bash
+python scripts/update_paper_price_cache.py --host <host> --port 8083 --api-key <key>
+python scripts/update_paper_price_cache.py --close --host <host> --port 8083 --api-key <key>
+```
+
 ## 数据目录
 
 默认读取项目根目录下的 ``data/paper_trading``。可通过以下方式修改：

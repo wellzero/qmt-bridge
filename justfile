@@ -87,6 +87,14 @@ download-paper-prices *ARGS:
 diagnose-paper-accounts *ARGS:
     python scripts/diagnose_paper_accounts.py {{ARGS}}
 
+# 更新模拟交易共享价格缓存（盘中最新价）
+update-paper-price-cache *ARGS:
+    python scripts/update_paper_price_cache.py {{ARGS}}
+
+# 更新模拟交易当日收盘价缓存
+update-paper-close-price *ARGS:
+    python scripts/update_paper_price_cache.py --close {{ARGS}}
+
 # ─────────────────────────── 仪表盘 ─────────────────────────
 
 # 启动可视化仪表盘（http://localhost:8501）
