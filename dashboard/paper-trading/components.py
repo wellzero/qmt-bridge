@@ -22,8 +22,10 @@ def render_account_cards(summaries_df: pd.DataFrame) -> None:
     total_asset = summaries_df["total_asset"].sum()
     total_pnl = summaries_df["total_pnl"].sum()
     total_trades = int(summaries_df["total_trades"].sum())
+    total_initial_cash = summaries_df["initial_cash"].sum()
+    total_return_rate = (total_pnl / total_initial_cash) if total_initial_cash else 0.0
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         st.metric("账户数量", total_accounts)
     with col2:
@@ -31,6 +33,8 @@ def render_account_cards(summaries_df: pd.DataFrame) -> None:
     with col3:
         st.metric("总盈亏", f"{total_pnl:,.2f}", delta=f"{total_pnl:,.2f}")
     with col4:
+        st.metric("总收益率", f"{total_return_rate * 100:.2f}%")
+    with col5:
         st.metric("总成交笔数", total_trades)
 
 
