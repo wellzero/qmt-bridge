@@ -9,7 +9,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from data_loader import load_all_orders, load_summary
-from pricing import calculate_live_pnl, is_trading_hours, resolve_prices
+from pricing import calculate_live_pnl, get_price_source_label, resolve_prices
 
 
 def render_account_cards(summaries_df: pd.DataFrame) -> None:
@@ -119,7 +119,7 @@ def render_account_detail(
         live_positions_df = live.get("positions", pd.DataFrame())
 
     if live:
-        price_label = "盘中最新价" if is_trading_hours() else "收盘价"
+        price_label = get_price_source_label(data_dir)
         st.markdown(f"#### 实时估算（基于 {price_label}）")
         lc1, lc2, lc3, lc4, lc5 = st.columns(5)
         with lc1:

@@ -183,6 +183,31 @@ def _is_current_cache_fresh(data: dict[str, Any]) -> bool:
         return True
 
 
+def get_price_source_label(data_dir: Path) -> str:
+    """返回当前正在使用的价格源标签，便于仪表盘展示。"""
+    current_raw = load_price_cache_raw(data_dir, None)
+    if current_raw and _is_current_cache_fresh(current_raw):
+        cache_type = current_raw.get("type", "")
+        if cache_type == "close":
+            return "收盘价"
+        return "最新价"
+
+    date_str = datetime.now().strftime("%Y%m%d")
+    if (_prices_dir(data_dir) / f"{date_str}.json").exists():
+        return "收盘价"
+
+    # 兜底：尝试找最近一日的收盘价缓存
+    prices_dir = _prices_dir(data_dir)
+    close_files = sorted(
+        [p for p in prices_dir.glob("*.json") if p.stem != "current"],
+        reverse=True,
+    )
+    if close_files:
+        return "收盘价"
+
+    return "最新可用价"
+
+
 def resolve_prices(
     data_dir: Path,
     stock_codes: list[str],
