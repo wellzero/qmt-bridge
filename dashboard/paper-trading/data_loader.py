@@ -144,7 +144,11 @@ def _read_single_csv(csv_path: Path) -> pd.DataFrame:
 
 
 def load_all_orders(data_dir: Path, account_id: str) -> pd.DataFrame:
-    """加载某账户所有日期的委托记录。"""
+    """加载某账户所有日期的委托记录。
+
+    部分模拟交易引擎会将历史委托重复写入新的 ``orders_YYYYMMDD.csv``，
+    因此按 ``order_id`` 去重，保留最早出现的那一行（其 ``trade_date`` 由最早的文件名推断，最为准确）。
+    """
     orders_dir = data_dir / account_id / "order"
     if not orders_dir.exists():
         return pd.DataFrame()
@@ -158,7 +162,12 @@ def load_all_orders(data_dir: Path, account_id: str) -> pd.DataFrame:
     if not frames:
         return pd.DataFrame()
     combined = pd.concat(frames, ignore_index=True)
-    return combined
+
+    if "order_id" in combined.columns:
+        # 保留首次出现，确保 trade_date 取最早的文件名日期
+        combined = combined.drop_duplicates(subset=["order_id"], keep="first")
+
+    return combined.reset_index(drop=True)
 
 
 def derive_positions(orders_df: pd.DataFrame) -> pd.DataFrame:
