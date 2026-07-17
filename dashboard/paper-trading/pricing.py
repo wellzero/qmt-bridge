@@ -256,7 +256,7 @@ def calculate_live_pnl(
     last_cash = sorted_orders["account_cash"].dropna().iloc[-1]
     cash = float(last_cash)
 
-    positions = derive_positions_with_cost(orders_df)
+    positions = derive_positions_with_cost(orders_df, initial_cash=initial_cash)
     if positions.empty:
         return {
             "cash": cash,

@@ -190,8 +190,53 @@ def derive_positions(orders_df: pd.DataFrame) -> pd.DataFrame:
     ]
 
 
-def derive_positions_with_cost(orders_df: pd.DataFrame) -> pd.DataFrame:
+def _detect_daily_reset(orders_df: pd.DataFrame, initial_cash: float) -> bool:
+    """检测账户是否在最新交易日重置为初始资金。
+
+    部分策略（如按日独立回测/调仓）每天都会把前一日持仓清空、
+    现金恢复到 ``initial_cash``，此时应仅使用最新交易日的委托推导持仓。
+    """
+    if orders_df.empty or "trade_date" not in orders_df.columns:
+        return False
+
+    dates = sorted(orders_df["trade_date"].unique())
+    if len(dates) <= 1:
+        return False
+
+    latest = orders_df[orders_df["trade_date"] == dates[-1]].sort_values(
+        by=["trade_date", "order_time"]
+    )
+    if latest.empty:
+        return False
+
+    first = latest.iloc[0]
+    order_type = str(first.get("order_type", ""))
+    cash = float(first.get("account_cash", 0) or 0)
+    volume = float(first.get("traded_volume", 0) or 0)
+    price = float(first.get("traded_price", 0) or 0)
+    commission = float(first.get("commission", 0) or 0)
+    stamp_tax = float(first.get("stamp_tax", 0) or 0)
+
+    if order_type == "23":  # 买入
+        pre_trade_cash = cash + volume * price + commission
+    elif order_type == "24":  # 卖出
+        pre_trade_cash = cash - volume * price + commission + stamp_tax
+    else:
+        return False
+
+    threshold = max(initial_cash * 0.05, 1000.0)
+    return abs(pre_trade_cash - initial_cash) < threshold
+
+
+def derive_positions_with_cost(
+    orders_df: pd.DataFrame, initial_cash: float | None = None
+) -> pd.DataFrame:
     """根据委托记录推导当前持仓，并计算成本均价与成本基数。
+
+    Args:
+        orders_df: 委托记录 DataFrame。
+        initial_cash: 初始资金；提供时用于检测每日重置型账户，
+            若检测到重置则仅使用最新交易日的委托推导持仓。
 
     Returns:
         DataFrame 列：``stock_code``、``volume``、``avg_cost``、``cost_basis``、
@@ -200,11 +245,16 @@ def derive_positions_with_cost(orders_df: pd.DataFrame) -> pd.DataFrame:
     if orders_df.empty or "stock_code" not in orders_df.columns:
         return pd.DataFrame()
 
-    buy_mask = orders_df["order_type"].astype(str) == "23"
-    sell_mask = orders_df["order_type"].astype(str) == "24"
+    df = orders_df.copy()
+    if initial_cash is not None and _detect_daily_reset(df, float(initial_cash)):
+        latest_date = sorted(df["trade_date"].unique())[-1]
+        df = df[df["trade_date"] == latest_date]
 
-    buy_rows = orders_df[buy_mask].copy()
-    sell_rows = orders_df[sell_mask].copy()
+    buy_mask = df["order_type"].astype(str) == "23"
+    sell_mask = df["order_type"].astype(str) == "24"
+
+    buy_rows = df[buy_mask].copy()
+    sell_rows = df[sell_mask].copy()
 
     # 买入成本与数量
     buy_cost = (
@@ -228,7 +278,7 @@ def derive_positions_with_cost(orders_df: pd.DataFrame) -> pd.DataFrame:
 
     # 最近成交价作为参考市值
     latest = (
-        orders_df.sort_values(by=["trade_date", "order_time"])
+        df.sort_values(by=["trade_date", "order_time"])
         .groupby("stock_code")
         .last()[["traded_price", "trade_date", "order_time"]]
         .reset_index()
