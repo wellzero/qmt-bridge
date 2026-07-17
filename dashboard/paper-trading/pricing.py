@@ -29,15 +29,15 @@ def _prices_dir(data_dir: Path) -> Path:
     return data_dir / "prices"
 
 
-def load_price_cache(data_dir: Path, date_str: str | None = None) -> dict[str, float]:
-    """加载价格缓存文件。
+def load_price_cache_raw(data_dir: Path, date_str: str | None = None) -> dict[str, Any]:
+    """加载价格缓存文件的原始内容（含 ``timestamp``、``type``、``prices``）。
 
     Args:
         data_dir: 模拟交易数据根目录。
         date_str: 日期字符串 ``YYYYMMDD``；为 ``None`` 时读取 ``current.json``。
 
     Returns:
-        股票代码到价格的映射字典。
+        缓存文件的原始字典；读取失败或文件不存在时返回空字典。
     """
     prices_dir = _prices_dir(data_dir)
     if date_str is None:
@@ -50,21 +50,33 @@ def load_price_cache(data_dir: Path, date_str: str | None = None) -> dict[str, f
 
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            return {}
-        prices = (
-            data.get("prices", data)
-            if isinstance(data.get("prices", {}), dict)
-            else data
-        )
-        return {
-            k: float(v)
-            for k, v in prices.items()
-            if isinstance(v, (int, float, str)) and v != ""
-        }
+        return data if isinstance(data, dict) else {}
     except Exception:
         logger.exception("读取价格缓存失败: %s", path)
         return {}
+
+
+def load_price_cache(data_dir: Path, date_str: str | None = None) -> dict[str, float]:
+    """加载价格缓存文件中的价格映射。
+
+    Args:
+        data_dir: 模拟交易数据根目录。
+        date_str: 日期字符串 ``YYYYMMDD``；为 ``None`` 时读取 ``current.json``。
+
+    Returns:
+        股票代码到价格的映射字典。
+    """
+    data = load_price_cache_raw(data_dir, date_str)
+    if not isinstance(data, dict):
+        return {}
+    prices = (
+        data.get("prices", data) if isinstance(data.get("prices", {}), dict) else data
+    )
+    return {
+        k: float(v)
+        for k, v in prices.items()
+        if isinstance(v, (int, float, str)) and v != ""
+    }
 
 
 def save_price_cache(
@@ -159,6 +171,18 @@ def is_trading_hours(now: datetime | None = None) -> bool:
     return morning or afternoon
 
 
+def _is_current_cache_fresh(data: dict[str, Any]) -> bool:
+    """判断 ``current.json`` 的价格是否为当日的盘中/收盘缓存。"""
+    timestamp = data.get("timestamp", "")
+    if not isinstance(timestamp, str) or not timestamp:
+        return True  # 旧格式无时间戳，直接视为可用
+    try:
+        ts_date = datetime.fromisoformat(timestamp).date()
+        return ts_date == datetime.now().date()
+    except ValueError:
+        return True
+
+
 def resolve_prices(
     data_dir: Path,
     stock_codes: list[str],
@@ -168,7 +192,7 @@ def resolve_prices(
     """为给定股票列表解析最优可用价格。
 
     优先级：
-    1. 盘中 ``current.json``（仅在交易时段）
+    1. 当日 ``current.json``（盘中最新价，不限制交易时段，只要缓存是当日的）
     2. 当日收盘价 ``YYYYMMDD.json``
     3. 账户配置 ``static_prices``
     """
@@ -177,14 +201,16 @@ def resolve_prices(
 
     prices: dict[str, float] = {}
 
-    # 交易时段优先使用盘中最新价
-    if is_trading_hours():
-        current = load_price_cache(data_dir, None)
-        for code in stock_codes:
-            if code in current:
-                prices[code] = current[code]
+    # 优先使用当日的 current.json（含交易时段盘中价或收盘后刚获取的最新价）
+    current_raw = load_price_cache_raw(data_dir, None)
+    if current_raw and _is_current_cache_fresh(current_raw):
+        current = current_raw.get("prices", current_raw)
+        if isinstance(current, dict):
+            for code in stock_codes:
+                if code in current:
+                    prices[code] = float(current[code])
 
-    # 收盘价作为盘中补充及盘后主价格
+    # 收盘价作为补充及盘后主价格
     close = load_price_cache(data_dir, date_str)
     for code in stock_codes:
         if code not in prices and code in close:
