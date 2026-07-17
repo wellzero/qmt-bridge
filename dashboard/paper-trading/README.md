@@ -69,6 +69,16 @@ just paper-dashboard
 - **收盘后**：读取 ``data/paper_trading/prices/YYYYMMDD.json``，使用当日收盘价估算。
 - 价格源优先级：盘中最新价 → 当日收盘价 → 账户配置 ``static_prices`` → 最近成交价兜底。
 
+仪表盘打开时会自动按上述价格源重新计算所有账户的实时盈亏，因此**总览卡片**和**账户列表**中的总资产、收益率等数据会随价格缓存实时变化。
+
+### 一键获取最新价
+
+在侧边栏填写 qmt-server 地址与 API Key 后，点击 **"获取最新价"** 按钮即可：
+
+1. 从 qmt-server ``/api/market/full_tick`` 接口拉取所有持仓股票的最新价。
+2. 保存到 ``data/paper_trading/prices/current.json``。
+3. 重新计算所有账户的实时盈亏并刷新仪表盘。
+
 更新价格缓存的方式：
 
 ```bash

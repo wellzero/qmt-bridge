@@ -52,7 +52,11 @@ def load_price_cache(data_dir: Path, date_str: str | None = None) -> dict[str, f
         data = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             return {}
-        prices = data.get("prices", data) if isinstance(data.get("prices", {}), dict) else data
+        prices = (
+            data.get("prices", data)
+            if isinstance(data.get("prices", {}), dict)
+            else data
+        )
         return {
             k: float(v)
             for k, v in prices.items()
@@ -61,6 +65,86 @@ def load_price_cache(data_dir: Path, date_str: str | None = None) -> dict[str, f
     except Exception:
         logger.exception("读取价格缓存失败: %s", path)
         return {}
+
+
+def save_price_cache(
+    data_dir: Path, prices: dict[str, float], close: bool = False
+) -> Path:
+    """保存价格缓存到文件。
+
+    Args:
+        data_dir: 模拟交易数据根目录。
+        prices: 股票代码到价格的映射。
+        close: 是否为收盘价；为 ``True`` 时保存为 ``YYYYMMDD.json``，否则 ``current.json``。
+
+    Returns:
+        保存的文件路径。
+    """
+    prices_dir = _prices_dir(data_dir)
+    prices_dir.mkdir(parents=True, exist_ok=True)
+
+    if close:
+        filename = f"{datetime.now().strftime('%Y%m%d')}.json"
+    else:
+        filename = "current.json"
+
+    path = prices_dir / filename
+    payload = {
+        "timestamp": datetime.now().isoformat(),
+        "type": "close" if close else "intraday",
+        "prices": prices,
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    logger.info("已保存 %d 条价格到 %s", len(prices), path)
+    return path
+
+
+def fetch_prices_from_server(
+    host: str, port: int, api_key: str, stock_codes: list[str]
+) -> dict[str, float]:
+    """通过 qmt-server 的 ``/api/market/full_tick`` 接口获取最新价格。
+
+    Returns:
+        成功获取的股票代码到价格的映射。
+    """
+    import urllib.error
+    import urllib.request
+
+    if not stock_codes:
+        return {}
+
+    stocks_param = ",".join(stock_codes)
+    encoded = urllib.request.quote(stocks_param)
+    url = f"http://{host}:{port}/api/market/full_tick?stocks={encoded}"
+    headers = {"Accept": "application/json"}
+    if api_key:
+        headers["X-API-Key"] = api_key
+
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        error_body = exc.read().decode("utf-8", errors="ignore")
+        logger.error("获取行情 HTTP 错误 %s: %s", exc.code, error_body)
+        raise RuntimeError(f"获取行情失败: HTTP {exc.code}") from exc
+    except Exception as exc:
+        logger.exception("获取行情失败")
+        raise RuntimeError(f"获取行情失败: {exc}") from exc
+
+    ticks = data.get("data", {}) if isinstance(data, dict) else {}
+    prices: dict[str, float] = {}
+    for code in stock_codes:
+        tick = ticks.get(code)
+        if not isinstance(tick, dict):
+            continue
+        for key in ("lastPrice", "close", "open", "lastprice"):
+            price = tick.get(key)
+            if isinstance(price, (int, float)) and price > 0:
+                prices[code] = float(price)
+                break
+
+    return prices
 
 
 def is_trading_hours(now: datetime | None = None) -> bool:
@@ -188,3 +272,95 @@ def calculate_live_pnl(
         else 0.0,
         "positions": positions,
     }
+
+
+def calculate_all_accounts_live_pnl(
+    data_dir: Path,
+    config: dict[str, Any],
+    date_str: str | None = None,
+) -> dict[str, dict[str, Any]]:
+    """为所有账户计算实时盈亏。
+
+    Returns:
+        ``{account_id: live_pnl_dict}`` 的字典。
+    """
+    from data_loader import list_account_ids, load_all_orders
+
+    account_ids = list_account_ids(data_dir)
+    if not account_ids:
+        return {}
+
+    # 汇总所有出现过的股票代码
+    all_stock_codes: set[str] = set()
+    for aid in account_ids:
+        orders = load_all_orders(data_dir, aid)
+        if not orders.empty and "stock_code" in orders.columns:
+            all_stock_codes.update(orders["stock_code"].dropna().unique())
+
+    # 解析最优价格
+    prices = resolve_prices(data_dir, list(all_stock_codes), date_str=date_str)
+
+    results: dict[str, dict[str, Any]] = {}
+    for aid in account_ids:
+        orders = load_all_orders(data_dir, aid)
+        account_config = config.get(aid, {})
+        initial_cash = float(account_config.get("initial_cash", 100_000.0))
+        results[aid] = calculate_live_pnl(orders, prices, initial_cash)
+
+    return results
+
+
+def build_live_summaries_df(
+    data_dir: Path,
+    config: dict[str, Any],
+    base_summaries_df: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """基于实时盈亏构建账户摘要 DataFrame，列名与 ``load_all_summaries`` 保持一致。
+
+    Args:
+        data_dir: 模拟交易数据根目录。
+        config: 账户配置字典。
+        base_summaries_df: 从 ``summary.json`` 加载的基础摘要 DataFrame，用于补充缺失字段。
+
+    Returns:
+        包含实时数据的账户摘要 DataFrame。
+    """
+    live_results = calculate_all_accounts_live_pnl(data_dir, config)
+    if not live_results:
+        return (
+            base_summaries_df.copy()
+            if base_summaries_df is not None
+            else pd.DataFrame()
+        )
+
+    rows = []
+    for account_id, live in live_results.items():
+        rows.append(
+            {
+                "account_id": account_id,
+                "initial_cash": float(
+                    config.get(account_id, {}).get("initial_cash", 100_000.0)
+                ),
+                "cash": live["cash"],
+                "market_value": live["market_value"],
+                "total_asset": live["total_asset"],
+                "total_pnl": live["total_pnl"],
+                "total_return_rate": live["total_return_rate"],
+                "realized_pnl": live["realized_pnl"],
+                "unrealized_pnl": live["unrealized_pnl"],
+                "total_trades": 0,
+            }
+        )
+
+    live_df = pd.DataFrame(rows)
+
+    # 如果提供了基础摘要，用其中的 total_trades 等字段补充
+    if base_summaries_df is not None and not base_summaries_df.empty:
+        base = base_summaries_df.set_index("account_id")
+        live_df = live_df.set_index("account_id")
+        for col in ["total_trades", "total_commission", "total_stamp_tax"]:
+            if col in base.columns:
+                live_df[col] = live_df.index.map(base[col].to_dict())
+        live_df = live_df.reset_index()
+
+    return live_df

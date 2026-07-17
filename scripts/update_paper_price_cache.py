@@ -29,18 +29,18 @@
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import sys
-from datetime import datetime
 from pathlib import Path
 
-# 将 qmt-bridge src 加入路径
+# 将 qmt-bridge src 与 dashboard/paper-trading 加入路径
 QMT_BRIDGE_SRC = Path(__file__).parent.parent / "src"
-if str(QMT_BRIDGE_SRC) not in sys.path:
-    sys.path.insert(0, str(QMT_BRIDGE_SRC))
+DASHBOARD_DIR = Path(__file__).parent.parent / "dashboard" / "paper-trading"
+for p in (QMT_BRIDGE_SRC, DASHBOARD_DIR):
+    if str(p) not in sys.path:
+        sys.path.insert(0, str(p))
 
-from qmt_bridge import QMTClient  # noqa: E402
+from pricing import fetch_prices_from_server, save_price_cache  # noqa: E402
 
 logger = logging.getLogger("update_paper_price_cache")
 
@@ -67,7 +67,6 @@ def _resolve_data_dir(args_data_dir: str) -> Path:
     """解析模拟交易数据目录。"""
     if args_data_dir:
         return Path(args_data_dir).expanduser().resolve()
-    # 默认：项目根目录 / data / paper_trading
     return Path(__file__).resolve().parents[2] / "data" / "paper_trading"
 
 
@@ -99,27 +98,6 @@ def _collect_stock_codes(data_dir: Path) -> list[str]:
     return sorted(codes)
 
 
-def _save_prices(data_dir: Path, prices: dict[str, float], close: bool) -> Path:
-    """保存价格缓存到文件。"""
-    prices_dir = data_dir / "prices"
-    prices_dir.mkdir(parents=True, exist_ok=True)
-
-    if close:
-        filename = f"{datetime.now().strftime('%Y%m%d')}.json"
-    else:
-        filename = "current.json"
-
-    path = prices_dir / filename
-    payload = {
-        "timestamp": datetime.now().isoformat(),
-        "type": "close" if close else "intraday",
-        "prices": prices,
-    }
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    logger.info("已保存 %d 条价格到 %s", len(prices), path)
-    return path
-
-
 def main() -> int:
     args = parse_args()
     logging.basicConfig(
@@ -137,31 +115,13 @@ def main() -> int:
 
     logger.info("汇总到 %d 只股票，准备获取价格", len(stock_codes))
 
-    client = QMTClient(
-        host=args.host,
-        port=args.port,
-        api_key=args.api_key,
-        paper=True,
-    )
-
     try:
-        resp = client._get("/api/market/full_tick", {"stocks": stock_codes})
-        data = resp.get("data", {})
+        prices = fetch_prices_from_server(
+            args.host, args.port, args.api_key, stock_codes
+        )
     except Exception as e:
         logger.error("获取行情失败: %s", e)
         return 1
-
-    prices: dict[str, float] = {}
-    for code in stock_codes:
-        tick = data.get(code)
-        if not isinstance(tick, dict):
-            continue
-        # 优先使用 lastPrice，否则 close/open
-        for key in ("lastPrice", "close", "open", "lastprice"):
-            price = tick.get(key)
-            if isinstance(price, (int, float)) and price > 0:
-                prices[code] = float(price)
-                break
 
     if not prices:
         logger.warning("未能获取到任何有效价格")
@@ -170,9 +130,11 @@ def main() -> int:
     logger.info("成功获取 %d/%d 只股票价格", len(prices), len(stock_codes))
     missing = set(stock_codes) - set(prices.keys())
     if missing:
-        logger.warning("以下 %d 只股票缺少价格: %s", len(missing), ", ".join(sorted(missing)))
+        logger.warning(
+            "以下 %d 只股票缺少价格: %s", len(missing), ", ".join(sorted(missing))
+        )
 
-    _save_prices(data_dir, prices, args.close)
+    save_price_cache(data_dir, prices, args.close)
     return 0
 
 

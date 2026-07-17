@@ -200,18 +200,15 @@ def derive_positions_with_cost(orders_df: pd.DataFrame) -> pd.DataFrame:
     # 买入成本与数量
     buy_cost = (
         buy_rows.assign(
-            cost=buy_rows["traded_volume"].fillna(0) * buy_rows["traded_price"].fillna(0)
+            cost=buy_rows["traded_volume"].fillna(0)
+            * buy_rows["traded_price"].fillna(0)
         )
         .groupby("stock_code")
         .agg({"traded_volume": "sum", "cost": "sum"})
         .rename(columns={"traded_volume": "buy_volume", "cost": "buy_cost"})
     )
 
-    sells = (
-        sell_rows.groupby("stock_code")["traded_volume"]
-        .sum()
-        .rename("sell_volume")
-    )
+    sells = sell_rows.groupby("stock_code")["traded_volume"].sum().rename("sell_volume")
 
     positions = pd.concat([buy_cost, sells], axis=1).fillna(0)
     positions["volume"] = positions["buy_volume"] - positions["sell_volume"]

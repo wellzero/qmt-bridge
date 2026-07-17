@@ -34,7 +34,9 @@ def render_account_cards(summaries_df: pd.DataFrame) -> None:
         st.metric("总成交笔数", total_trades)
 
 
-def render_accounts_table(summaries_df: pd.DataFrame, key: str = "accounts_table") -> str | None:
+def render_accounts_table(
+    summaries_df: pd.DataFrame, key: str = "accounts_table"
+) -> str | None:
     """渲染所有账户摘要表格，支持点击单行选择账户。
 
     返回被选中行的 ``account_id``；未选择时返回 ``None``。
@@ -105,7 +107,9 @@ def render_account_detail(
         st.metric("总收益率", f"{rate:.2f}%")
 
     # ── 实时估算（当前价/收盘价）──────────────────────────────────────
-    initial_cash = float(account_config.get("initial_cash", summary.get("initial_cash", 100_000)))
+    initial_cash = float(
+        account_config.get("initial_cash", summary.get("initial_cash", 100_000))
+    )
     live_positions_df = pd.DataFrame()
     live = {}
     if not orders_df.empty:
@@ -131,9 +135,9 @@ def render_account_detail(
 
         if not live_positions_df.empty:
             display_positions = live_positions_df.copy()
-            display_positions["current_price"] = display_positions["current_price"].fillna(
-                display_positions["traded_price"]
-            )
+            display_positions["current_price"] = display_positions[
+                "current_price"
+            ].fillna(display_positions["traded_price"])
             display_positions = display_positions.rename(
                 columns={
                     "stock_code": "股票代码",
