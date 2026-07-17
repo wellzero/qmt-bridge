@@ -92,26 +92,13 @@ def render_account_detail(
 
     st.subheader(f"账户：{account_id}")
 
-    # ── 摘要指标 ────────────────────────────────────────────────────
-    col1, col2, col3, col4, col5 = st.columns(5)
-    with col1:
-        st.metric("总资产", f"{float(summary.get('total_asset', 0)):,.2f}")
-    with col2:
-        st.metric("可用资金", f"{float(summary.get('cash', 0)):,.2f}")
-    with col3:
-        st.metric("持仓市值", f"{float(summary.get('market_value', 0)):,.2f}")
-    with col4:
-        st.metric("总盈亏", f"{float(summary.get('total_pnl', 0)):,.2f}")
-    with col5:
-        rate = float(summary.get("total_return_rate", 0)) * 100
-        st.metric("总收益率", f"{rate:.2f}%")
-
-    # ── 实时估算（当前价/收盘价）──────────────────────────────────────
+    # ── 实时盈亏（基于当前/收盘最新价）─────────────────────────────────
     initial_cash = float(
         account_config.get("initial_cash", summary.get("initial_cash", 100_000))
     )
     live_positions_df = pd.DataFrame()
-    live = {}
+    live: dict[str, Any] = {}
+    prices: dict[str, float] = {}
     if not orders_df.empty:
         stock_codes = orders_df["stock_code"].dropna().unique().tolist()
         prices = resolve_prices(data_dir, stock_codes, account_config)
@@ -120,18 +107,19 @@ def render_account_detail(
 
     if live:
         price_label = get_price_source_label(data_dir)
-        st.markdown(f"#### 实时估算（基于 {price_label}）")
-        lc1, lc2, lc3, lc4, lc5 = st.columns(5)
-        with lc1:
-            st.metric("估算总资产", f"{live['total_asset']:,.2f}")
-        with lc2:
+        st.caption(f"价格来源：{price_label}")
+
+        col1, col2, col3, col4, col5 = st.columns(5)
+        with col1:
+            st.metric("总资产", f"{live['total_asset']:,.2f}")
+        with col2:
             st.metric("可用资金", f"{live['cash']:,.2f}")
-        with lc3:
+        with col3:
             st.metric("持仓市值", f"{live['market_value']:,.2f}")
-        with lc4:
-            st.metric("估算总盈亏", f"{live['total_pnl']:,.2f}")
-        with lc5:
-            st.metric("估算收益率", f"{live['total_return_rate'] * 100:.2f}%")
+        with col4:
+            st.metric("总盈亏", f"{live['total_pnl']:,.2f}")
+        with col5:
+            st.metric("总收益率", f"{live['total_return_rate'] * 100:.2f}%")
 
         if not live_positions_df.empty:
             display_positions = live_positions_df.copy()
@@ -154,6 +142,19 @@ def render_account_detail(
         else:
             st.info("当前无持仓。")
     else:
+        # 无委托记录时，回退到 summary.json
+        col1, col2, col3, col4, col5 = st.columns(5)
+        with col1:
+            st.metric("总资产", f"{float(summary.get('total_asset', 0)):,.2f}")
+        with col2:
+            st.metric("可用资金", f"{float(summary.get('cash', 0)):,.2f}")
+        with col3:
+            st.metric("持仓市值", f"{float(summary.get('market_value', 0)):,.2f}")
+        with col4:
+            st.metric("总盈亏", f"{float(summary.get('total_pnl', 0)):,.2f}")
+        with col5:
+            rate = float(summary.get("total_return_rate", 0)) * 100
+            st.metric("总收益率", f"{rate:.2f}%")
         st.info("暂无委托记录，无法估算实时盈亏。")
 
     # ── 配置信息 ────────────────────────────────────────────────────
