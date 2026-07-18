@@ -190,73 +190,17 @@ def derive_positions(orders_df: pd.DataFrame) -> pd.DataFrame:
     ]
 
 
-def _detect_daily_reset(orders_df: pd.DataFrame, initial_cash: float) -> bool:
-    """检测账户是否在最新交易日重置为初始资金。
-
-    部分策略（如按日独立回测/调仓）每天都会把前一日持仓清空、
-    现金恢复到 ``initial_cash``，此时应仅使用最新交易日的委托推导持仓。
-    """
-    if orders_df.empty or "trade_date" not in orders_df.columns:
-        return False
-
-    dates = sorted(orders_df["trade_date"].unique())
-    if len(dates) <= 1:
-        return False
-
-    latest = orders_df[orders_df["trade_date"] == dates[-1]].sort_values(
-        by=["trade_date", "order_time"]
-    )
-    if latest.empty:
-        return False
-
-    first = latest.iloc[0]
-    order_type = str(first.get("order_type", ""))
-    cash = float(first.get("account_cash", 0) or 0)
-    volume = float(first.get("traded_volume", 0) or 0)
-    price = float(first.get("traded_price", 0) or 0)
-    commission = float(first.get("commission", 0) or 0)
-    stamp_tax = float(first.get("stamp_tax", 0) or 0)
-
-    if order_type == "23":  # 买入
-        pre_trade_cash = cash + volume * price + commission
-    elif order_type == "24":  # 卖出
-        pre_trade_cash = cash - volume * price + commission + stamp_tax
-    else:
-        return False
-
-    threshold = max(initial_cash * 0.05, 1000.0)
-    return abs(pre_trade_cash - initial_cash) < threshold
-
-
-def derive_positions_with_cost(
-    orders_df: pd.DataFrame, initial_cash: float | None = None
-) -> pd.DataFrame:
-    """根据委托记录推导当前持仓，并计算成本均价与成本基数。
-
-    Args:
-        orders_df: 委托记录 DataFrame。
-        initial_cash: 初始资金；提供时用于检测每日重置型账户，
-            若检测到重置则仅使用最新交易日的委托推导持仓。
-
-    Returns:
-        DataFrame 列：``stock_code``、``volume``、``avg_cost``、``cost_basis``、
-        ``traded_price``、``market_value``、``trade_date``、``order_time``。
-    """
+def _derive_positions_core(orders_df: pd.DataFrame) -> pd.DataFrame:
+    """根据委托记录计算持仓的核心逻辑（买入 - 卖出）。"""
     if orders_df.empty or "stock_code" not in orders_df.columns:
         return pd.DataFrame()
 
-    df = orders_df.copy()
-    if initial_cash is not None and _detect_daily_reset(df, float(initial_cash)):
-        latest_date = sorted(df["trade_date"].unique())[-1]
-        df = df[df["trade_date"] == latest_date]
+    buy_mask = orders_df["order_type"].astype(str) == "23"
+    sell_mask = orders_df["order_type"].astype(str) == "24"
 
-    buy_mask = df["order_type"].astype(str) == "23"
-    sell_mask = df["order_type"].astype(str) == "24"
+    buy_rows = orders_df[buy_mask].copy()
+    sell_rows = orders_df[sell_mask].copy()
 
-    buy_rows = df[buy_mask].copy()
-    sell_rows = df[sell_mask].copy()
-
-    # 买入成本与数量
     buy_cost = (
         buy_rows.assign(
             cost=buy_rows["traded_volume"].fillna(0)
@@ -273,12 +217,14 @@ def derive_positions_with_cost(
     positions["volume"] = positions["buy_volume"] - positions["sell_volume"]
     positions = positions[positions["volume"] > 0].reset_index()
 
+    if positions.empty:
+        return pd.DataFrame()
+
     positions["avg_cost"] = (positions["buy_cost"] / positions["buy_volume"]).round(4)
     positions["cost_basis"] = positions["avg_cost"] * positions["volume"]
 
-    # 最近成交价作为参考市值
     latest = (
-        df.sort_values(by=["trade_date", "order_time"])
+        orders_df.sort_values(by=["trade_date", "order_time"])
         .groupby("stock_code")
         .last()[["traded_price", "trade_date", "order_time"]]
         .reset_index()
@@ -297,3 +243,82 @@ def derive_positions_with_cost(
             "order_time",
         ]
     ]
+
+
+def _derive_latest_day_positions(orders_df: pd.DataFrame) -> pd.DataFrame:
+    """适用于每日调仓/重置账户的持仓推导。
+
+    以最近有买入的交易日为基准（该日之前的持仓视为已清算），
+    再减去该日之后（含该日）的卖出委托。
+    """
+    if orders_df.empty or "trade_date" not in orders_df.columns:
+        return pd.DataFrame()
+
+    buy_dates = sorted(
+        orders_df[orders_df["order_type"].astype(str) == "23"]["trade_date"].unique()
+    )
+    if not buy_dates:
+        return pd.DataFrame()
+
+    base_date = buy_dates[-1]
+    relevant = orders_df[orders_df["trade_date"] >= base_date].copy()
+    return _derive_positions_core(relevant)
+
+
+def derive_positions_with_cost(
+    orders_df: pd.DataFrame,
+    initial_cash: float | None = None,
+    reference_market_value: float | None = None,
+) -> pd.DataFrame:
+    """根据委托记录推导当前持仓，并计算成本均价与成本基数。
+
+    会自动在"累积型"和"每日调仓型"之间选择：
+    - 累积型：所有历史委托累加计算持仓。
+    - 每日调仓型：以最近买入日为基准，之前持仓视为已清算。
+
+    若提供 ``reference_market_value``（例如 summary.json 或最近委托的 account_market_value），
+    则比较两种模型的市值，选择更接近参考值的结果。
+
+    Args:
+        orders_df: 委托记录 DataFrame。
+        initial_cash: 初始资金（保留参数，暂未使用，供后续扩展）。
+        reference_market_value: 参考市值，用于选择持仓模型。
+
+    Returns:
+        DataFrame 列：``stock_code``、``volume``、``avg_cost``、``cost_basis``、
+        ``traded_price``、``market_value``、``trade_date``、``order_time``。
+    """
+    if orders_df.empty or "stock_code" not in orders_df.columns:
+        return pd.DataFrame()
+
+    cumulative = _derive_positions_core(orders_df)
+
+    # 若没有参考市值，或只有单日委托，直接用累积模型
+    if reference_market_value is None or len(orders_df["trade_date"].unique()) <= 1:
+        return cumulative
+
+    latest_day = _derive_latest_day_positions(orders_df)
+
+    cumulative_mv = (
+        float(cumulative["market_value"].sum()) if not cumulative.empty else 0.0
+    )
+    latest_day_mv = (
+        float(latest_day["market_value"].sum()) if not latest_day.empty else 0.0
+    )
+    ref = float(reference_market_value)
+
+    # 选择与参考市值更接近的模型；差异超过 30% 时打日志提示
+    diff_cumulative = abs(cumulative_mv - ref)
+    diff_latest_day = abs(latest_day_mv - ref)
+
+    if diff_cumulative <= diff_latest_day:
+        return cumulative
+
+    logger.info(
+        "检测到每日调仓型账户：累积模型市值 %.0f 与参考值 %.0f 偏差过大，"
+        "改用最新买入日模型，市值 %.0f",
+        cumulative_mv,
+        ref,
+        latest_day_mv,
+    )
+    return latest_day

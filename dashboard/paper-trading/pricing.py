@@ -281,7 +281,14 @@ def calculate_live_pnl(
     last_cash = sorted_orders["account_cash"].dropna().iloc[-1]
     cash = float(last_cash)
 
-    positions = derive_positions_with_cost(orders_df, initial_cash=initial_cash)
+    # 用最近一条委托的 account_market_value 作为持仓模型选择参考
+    reference_market_value = sorted_orders["account_market_value"].dropna().iloc[-1]
+
+    positions = derive_positions_with_cost(
+        orders_df,
+        initial_cash=initial_cash,
+        reference_market_value=float(reference_market_value),
+    )
     if positions.empty:
         return {
             "cash": cash,
