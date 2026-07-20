@@ -14,12 +14,11 @@
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import logging
 
 import streamlit as st
 
+from auth import logout_button, require_auth
 from components import (
     render_account_cards,
     render_account_detail,
@@ -41,57 +40,13 @@ from pricing import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ── 认证配置 ──────────────────────────────────────────────────────────
-
-_AUTH_USERNAME = "admin"
-# SHA256(admin:quant2024) 的密码哈希，避免明文存储
-_AUTH_PASSWORD_HASH = "8a050f9ba34664b9feb7735e0d6320944c9d725c772060406543e13fbb23f925"
-
-
-def _hash_password(password: str) -> str:
-    """计算密码的 SHA256 哈希。"""
-    return hashlib.sha256(password.encode("utf-8"), usedforsecurity=True).hexdigest()
-
-
-def _verify_password(password: str) -> bool:
-    """恒定时间比较密码，降低时序攻击风险。"""
-    return hmac.compare_digest(
-        _hash_password(password),
-        _AUTH_PASSWORD_HASH,
-    )
-
-
-def _render_login() -> None:
-    """渲染登录表单；验证通过前会阻塞后续页面内容。"""
-    st.title("🔒 模拟交易仪表盘")
-    st.caption("请输入用户名和密码登录")
-
-    with st.form("login_form", clear_on_submit=True):
-        username = st.text_input("用户名", value="", placeholder="admin")
-        password = st.text_input("密码", type="password", placeholder="请输入密码")
-        submitted = st.form_submit_button("登录", use_container_width=True)
-
-        if submitted:
-            if username == _AUTH_USERNAME and _verify_password(password):
-                st.session_state.authenticated = True
-                st.rerun()
-            else:
-                st.error("用户名或密码错误")
-
-    st.stop()
-
-
-if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
-
 st.set_page_config(
     page_title="模拟交易仪表盘",
     page_icon="📈",
     layout="wide",
 )
 
-if not st.session_state.authenticated:
-    _render_login()
+require_auth()
 
 
 def _do_fetch_prices() -> None:
@@ -198,9 +153,7 @@ with st.sidebar:
         _do_fetch_prices()
 
     st.markdown("---")
-    if st.button("退出登录", use_container_width=True):
-        st.session_state.authenticated = False
-        st.rerun()
+    logout_button()
 
 
 data_dir = resolve_data_dir(data_dir_input)
