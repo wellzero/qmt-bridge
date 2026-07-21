@@ -12,7 +12,7 @@ import pandas as pd
 import streamlit as st
 
 from auth import logout_button, require_auth
-from components import render_account_detail
+from components import render_account_detail, render_big_title
 from data_loader import list_account_ids, load_all_orders, load_config, resolve_data_dir
 from pricing import build_live_summaries_df
 
@@ -33,7 +33,7 @@ def _today_str() -> str:
     return datetime.now().strftime("%Y%m%d")
 
 
-st.title("📅 Today's Trading Accounts")
+render_big_title("📅 Today's Trading Accounts")
 today = _today_str()
 st.caption(f"日期：{today[:4]}-{today[4:6]}-{today[6:]}")
 

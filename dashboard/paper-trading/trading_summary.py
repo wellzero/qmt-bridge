@@ -2,7 +2,7 @@
 
 独立运行：
 
-    streamlit run dashboard/paper-trading/app.py
+    streamlit run dashboard/paper-trading/trading_summary.py
 
 或：
 
@@ -23,6 +23,7 @@ from components import (
     render_account_cards,
     render_account_detail,
     render_accounts_table,
+    render_big_title,
 )
 from data_loader import (
     list_account_ids,
@@ -102,7 +103,7 @@ def _do_fetch_prices() -> None:
     st.rerun()
 
 
-st.title("Trading Summary")
+render_big_title("📈 Trading Summary")
 st.caption("直接读取本地 ``data/paper_trading`` 目录，无需连接 qmt-server")
 
 if st.session_state.get("last_price_update"):
@@ -126,7 +127,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown("**运行方式**")
-    st.code("streamlit run dashboard/paper-trading/app.py", language="bash")
+    st.code("streamlit run dashboard/paper-trading/trading_summary.py", language="bash")
 
     st.markdown("---")
     st.markdown("**行情更新**")

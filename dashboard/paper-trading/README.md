@@ -29,7 +29,7 @@ pip install -e ".[dashboard]"
 ### 2. 启动仪表盘
 
 ```bash
-streamlit run dashboard/paper-trading/app.py
+streamlit run dashboard/paper-trading/trading_summary.py
 ```
 
 或使用 just 快捷命令：
@@ -107,6 +107,8 @@ python scripts/update_paper_price_cache.py --close --host <host> --port 8083 --a
 
 ## 文件说明
 
-- ``app.py``：Streamlit 入口页面
+- ``trading_summary.py``：Streamlit 入口页面（Trading Summary）
+- ``pages/today_trading.py``：今日交易账户子页面
+- ``auth.py``：登录认证共享模块
 - ``data_loader.py``：读取 ``config.json``、``summary.json`` 和 ``order/*.csv``
 - ``components.py``：页面展示组件

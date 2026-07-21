@@ -103,7 +103,7 @@ dashboard:
 
 # 启动模拟交易结果仪表盘（http://localhost:8501）
 paper-dashboard:
-    streamlit run dashboard/paper-trading/app.py
+    streamlit run dashboard/paper-trading/trading_summary.py
 
 # ─────────────────────────── 文档 ───────────────────────────
 

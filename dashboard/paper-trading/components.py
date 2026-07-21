@@ -12,6 +12,23 @@ from data_loader import load_all_orders, load_summary
 from pricing import calculate_live_pnl, get_price_source_label, resolve_prices
 
 
+def render_big_title(title: str) -> None:
+    """渲染大号页面标题。"""
+    st.markdown(
+        f"""
+        <style>
+        .big-title {{
+            font-size: 3rem !important;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }}
+        </style>
+        <h1 class="big-title">{title}</h1>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_account_cards(summaries_df: pd.DataFrame) -> None:
     """渲染账户概览卡片。"""
     if summaries_df.empty:
