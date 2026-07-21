@@ -37,12 +37,12 @@ def require_auth() -> None:
         return
 
     st.set_page_config(
-        page_title="模拟交易仪表盘",
+        page_title="Trading Summary",
         page_icon="📈",
         layout="wide",
     )
 
-    st.title("🔒 模拟交易仪表盘")
+    st.title("🔒 Trading Summary")
     st.caption("请输入用户名和密码登录")
 
     with st.form("login_form", clear_on_submit=True):

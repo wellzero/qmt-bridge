@@ -1,4 +1,4 @@
-# 模拟交易结果仪表盘
+# Trading Summary
 
 基于 Streamlit 的独立 HTTP 仪表盘，用于可视化展示 ``data/paper_trading`` 下的所有模拟交易账户结果。
 

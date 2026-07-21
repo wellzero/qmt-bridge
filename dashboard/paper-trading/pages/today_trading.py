@@ -20,7 +20,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 st.set_page_config(
-    page_title="今日交易账户 - 模拟交易仪表盘",
+    page_title="Today's Trading Accounts - Trading Summary",
     page_icon="📅",
     layout="wide",
 )
@@ -33,7 +33,7 @@ def _today_str() -> str:
     return datetime.now().strftime("%Y%m%d")
 
 
-st.title("📅 今日交易账户")
+st.title("📅 Today's Trading Accounts")
 today = _today_str()
 st.caption(f"日期：{today[:4]}-{today[4:6]}-{today[6:]}")
 
@@ -107,7 +107,19 @@ def _load_today_data(data_dir_str: str, date_str: str):
             }
         )
 
-    return config, pd.DataFrame(accounts_today)
+    return config, pd.DataFrame(
+        accounts_today,
+        columns=[
+            "account_id",
+            "orders_today",
+            "buy_count",
+            "sell_count",
+            "stocks",
+            "total_asset",
+            "total_pnl",
+            "total_return_rate",
+        ],
+    )
 
 
 config, today_df = _load_today_data(str(data_dir), today)

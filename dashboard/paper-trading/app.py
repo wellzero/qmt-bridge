@@ -1,4 +1,4 @@
-"""模拟交易结果可视化仪表盘。
+"""Trading Summary.
 
 独立运行：
 
@@ -41,7 +41,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 st.set_page_config(
-    page_title="模拟交易仪表盘",
+    page_title="Trading Summary",
     page_icon="📈",
     layout="wide",
 )
@@ -102,7 +102,7 @@ def _do_fetch_prices() -> None:
     st.rerun()
 
 
-st.title("模拟交易结果仪表盘")
+st.title("Trading Summary")
 st.caption("直接读取本地 ``data/paper_trading`` 目录，无需连接 qmt-server")
 
 if st.session_state.get("last_price_update"):
