@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 from pathlib import Path
 
@@ -33,7 +34,9 @@ def trader(temp_data_dir: Path):
     t = PaperQuantTrader(path="", session_id=1)
     t._storage.data_dir = temp_data_dir
     t._storage._ensure_dirs()
-    t._config_manager._storage = t._storage
+    # 注意：ConfigManager 的属性名是 storage，误写 _storage 不会生效，
+    # 曾导致测试把账户配置写入项目真实 data/paper_trading/config.json
+    t._config_manager.storage = t._storage
     t._config_manager._configs = {}
     t._accounts = {}
     t.connect()
@@ -194,6 +197,34 @@ def test_csv_order_logging(trader: PaperQuantTrader, temp_data_dir: Path):
     assert len(rows) == 1
     assert rows[0]["stock_code"] == "000001.SZ"
     assert rows[0]["order_volume"] == "500"
+
+
+def test_remove_account_files_clears_all_dated_order_csvs(temp_data_dir: Path):
+    """重置账户时应删除全部历史日期的委托 CSV，而非仅当日文件。
+
+    回归场景：委托按日期分文件存储，若只删当日文件，重置前的历史委托
+    会残留，导致仪表盘按流水推导出幽灵持仓。
+    """
+    storage = PaperTradingStorage(temp_data_dir)
+    account_id = "acc_reset"
+    order_row = {
+        "order_time": "10:00:00",
+        "order_id": "1",
+        "stock_code": "000001.SZ",
+        "order_type": "23",
+        "traded_volume": "100",
+        "traded_price": "10.0",
+    }
+    storage.write_orders(account_id, [order_row], date_str="20260715")
+    storage.write_orders(account_id, [order_row], date_str="20260819")
+    storage.write_summary(
+        AccountSummary(account_id=account_id, initial_cash=100000.0, cash=99000.0)
+    )
+
+    storage.remove_account_files(account_id)
+
+    account_dir = temp_data_dir / "paper_trading" / account_id
+    assert not account_dir.exists()  # 委托 CSV、摘要及空目录一并清理
 
 
 def test_manager_lifecycle(temp_data_dir: Path):
@@ -418,6 +449,57 @@ def test_manager_download_prices_with_mock(temp_data_dir: Path):
     assert updated_config.static_prices["000001.SZ"] == pytest.approx(12.34)
 
     manager.disconnect()
+
+
+def test_config_manager_follows_manager_data_dir(temp_data_dir: Path):
+    """回归测试：manager 注入的 data_dir 必须生效，配置不得写入默认目录。
+
+    旧代码把 storage 赋给 ConfigManager 不存在的 ``_storage`` 属性，
+    导致单测把账户配置写进项目真实 ``data/paper_trading/config.json``，
+    覆盖了生产配置（2026-08-25 事故：35 个实盘/模拟账户配置被清空）。
+    """
+    manager = PaperTraderManager(data_dir=temp_data_dir)
+    manager.connect()
+
+    assert manager._trader._config_manager.storage.paper_trading_dir == (
+        temp_data_dir / "paper_trading"
+    )
+
+    manager.create_or_update_account(
+        PaperAccountConfig(account_id="acc_isolation", initial_cash=1000.0)
+    )
+    written = json.loads(
+        (temp_data_dir / "paper_trading" / "config.json").read_text(encoding="utf-8")
+    )
+    assert "acc_isolation" in written
+
+    manager.disconnect()
+
+
+def test_storage_data_dir_reassignment_redirects_writes(tmp_path: Path):
+    """回归测试：构造后重新赋值 data_dir 必须同步重算 paper_trading_dir。"""
+    from qmt_bridge.server.paper_trading.storage import PaperTradingStorage
+
+    storage = PaperTradingStorage(data_dir=tmp_path / "old")
+    storage.data_dir = tmp_path / "new"
+
+    assert storage.paper_trading_dir == tmp_path / "new" / "paper_trading"
+    assert storage.config_path == tmp_path / "new" / "paper_trading" / "config.json"
+
+
+def test_storage_config_path_override(tmp_path: Path):
+    """config_path 可显式覆盖，覆盖后读写均指向新路径。"""
+    from qmt_bridge.server.paper_trading.storage import PaperTradingStorage
+
+    storage = PaperTradingStorage(data_dir=tmp_path)
+    override = tmp_path / "custom_config.json"
+    storage.config_path = override
+
+    assert storage.config_path == override
+    storage.write_config({"acc_x": {"account_id": "acc_x"}})
+    assert json.loads(override.read_text(encoding="utf-8")) == {
+        "acc_x": {"account_id": "acc_x"}
+    }
 
 
 def test_storage_folder_structure(temp_data_dir: Path):

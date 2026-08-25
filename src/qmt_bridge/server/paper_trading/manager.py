@@ -47,7 +47,10 @@ class PaperTraderManager:
 
         self._trader = PaperQuantTrader(path="", session_id=0)
         self._trader._storage = storage
-        self._trader._config_manager._storage = storage
+        # 注意：ConfigManager 的属性名是 storage。旧代码误赋值给不存在的
+        # ``_storage``，导致配置读写仍指向默认目录（cwd/data），测试因此
+        # 覆盖过生产 config.json
+        self._trader._config_manager.storage = storage
         self._trader._config_manager._load()
         self._trader._load_accounts()
         self._trader._sync_accounts_from_storage()
