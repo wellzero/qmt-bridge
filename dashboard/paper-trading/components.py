@@ -83,11 +83,9 @@ def render_accounts_table(
     display_df = display_df[[c for c in rename_map if c in display_df.columns]]
     display_df = display_df.rename(columns=rename_map)
 
-    # 格式化收益率
+    # 总收益率保持数值类型，由 column_config 格式化显示，确保可正确排序
     if "总收益率" in display_df.columns:
-        display_df["总收益率"] = display_df["总收益率"].apply(
-            lambda x: f"{x * 100:.2f}%" if pd.notna(x) else "-"
-        )
+        display_df["总收益率"] = display_df["总收益率"] * 100
 
     event = st.dataframe(
         display_df,
@@ -96,6 +94,11 @@ def render_accounts_table(
         on_select="rerun",
         selection_mode="single-row",
         key=key,
+        column_config={
+            "总收益率": st.column_config.NumberColumn(
+                "总收益率", format="%.2f%%", help="按数值排序"
+            )
+        },
     )
     selected = event.selection
     if selected and selected.get("rows"):
@@ -163,12 +166,15 @@ def render_account_detail(
         else:
             st.info("当前无持仓。")
     else:
-        # 无委托记录时，回退到 summary.json
+        # 无委托记录时，回退到 summary.json；仅有 config 注册的账户
+        # （尚无 summary.json）用初始资金兜底，避免全部显示为 0
         col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
-            st.metric("总资产", f"{float(summary.get('total_asset', 0)):,.2f}")
+            st.metric(
+                "总资产", f"{float(summary.get('total_asset', initial_cash)):,.2f}"
+            )
         with col2:
-            st.metric("可用资金", f"{float(summary.get('cash', 0)):,.2f}")
+            st.metric("可用资金", f"{float(summary.get('cash', initial_cash)):,.2f}")
         with col3:
             st.metric("持仓市值", f"{float(summary.get('market_value', 0)):,.2f}")
         with col4:

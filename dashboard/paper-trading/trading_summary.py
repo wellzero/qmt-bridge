@@ -26,10 +26,12 @@ from components import (
     render_big_title,
 )
 from data_loader import (
+    create_account,
     list_account_ids,
     load_all_orders,
     load_all_summaries,
     load_config,
+    remove_account,
     resolve_data_dir,
 )
 from pricing import (
@@ -111,6 +113,9 @@ if st.session_state.get("last_price_update"):
         f"已获取最新价：共更新 {st.session_state['last_price_update']} 只股票，账户统计已按最新价重新计算"
     )
 
+if st.session_state.get("last_account_removal"):
+    st.success(st.session_state.pop("last_account_removal"))
+
 # ── 侧边栏 ──────────────────────────────────────────────────────────
 
 with st.sidebar:
@@ -124,6 +129,69 @@ with st.sidebar:
     if st.button("刷新数据", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
+
+    st.markdown("---")
+    st.markdown("**账户管理**")
+
+    # 新增 / 删除账户操作的目标目录与下方数据加载保持一致
+    data_dir = resolve_data_dir(data_dir_input)
+
+    with st.expander("➕ 新增模拟账户"):
+        st.text_input(
+            "账户 ID",
+            key="new_account_id",
+            help="仅允许字母、数字、下划线、连字符",
+        )
+        st.number_input(
+            "初始资金",
+            min_value=1000.0,
+            value=100000.0,
+            step=10000.0,
+            key="new_account_cash",
+        )
+        if st.button("创建账户", use_container_width=True):
+            new_id = st.session_state.new_account_id
+            try:
+                create_account(
+                    data_dir, new_id, float(st.session_state.new_account_cash)
+                )
+            except ValueError as exc:
+                st.error(str(exc))
+            else:
+                st.cache_data.clear()
+                st.session_state.selected_account = new_id.strip()
+                st.rerun()
+
+    with st.expander("🗑️ 删除模拟账户"):
+        # list_account_ids 已包含有数据的账户与仅在 config.json 注册的账户
+        removable = list_account_ids(data_dir)
+        if not removable:
+            st.caption("没有可删除的账户")
+        else:
+            st.selectbox("选择账户", removable, key="remove_account_id")
+            st.checkbox(
+                "确认删除（账户数据将移入 .trash/，可手动恢复）",
+                key="remove_account_confirm",
+            )
+            if st.button(
+                "删除账户",
+                use_container_width=True,
+                disabled=not st.session_state.get("remove_account_confirm"),
+            ):
+                removed_id = st.session_state.remove_account_id
+                try:
+                    trashed = remove_account(data_dir, removed_id)
+                except ValueError as exc:
+                    st.error(str(exc))
+                else:
+                    st.cache_data.clear()
+                    if st.session_state.get("selected_account") == removed_id:
+                        del st.session_state.selected_account
+                    st.session_state["last_account_removal"] = (
+                        f"已删除账户：{removed_id}"
+                        + (f"，数据已移入 ``{trashed}``" if trashed else "")
+                    )
+                    st.rerun()
 
     st.markdown("---")
     st.markdown("**运行方式**")
@@ -156,8 +224,6 @@ with st.sidebar:
     st.markdown("---")
     logout_button()
 
-
-data_dir = resolve_data_dir(data_dir_input)
 
 if not data_dir.exists():
     st.error(f"数据目录不存在：``{data_dir}``")

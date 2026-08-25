@@ -145,9 +145,8 @@ with col4:
 
 st.markdown("### 今日交易账户列表（点击行查看详情）")
 display_df = today_df.copy()
-display_df["total_return_rate"] = display_df["total_return_rate"].apply(
-    lambda x: f"{x * 100:.2f}%" if pd.notna(x) else "-"
-)
+# 总收益率保持数值类型，由 column_config 格式化显示，确保可正确排序
+display_df["total_return_rate"] = display_df["total_return_rate"] * 100
 rename_map = {
     "account_id": "账户 ID",
     "orders_today": "今日委托数",
@@ -168,6 +167,11 @@ event = st.dataframe(
     on_select="rerun",
     selection_mode="single-row",
     key="today_accounts_table",
+    column_config={
+        "总收益率": st.column_config.NumberColumn(
+            "总收益率", format="%.2f%%", help="按数值排序"
+        )
+    },
 )
 
 selected_account = None

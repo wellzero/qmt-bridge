@@ -412,13 +412,14 @@ def build_live_summaries_df(
 
     live_df = pd.DataFrame(rows)
 
-    # 如果提供了基础摘要，用其中的 total_trades 等字段补充
+    # 如果提供了基础摘要，用其中的 total_trades 等字段补充；
+    # 尚无 summary.json 的账户（仅 config 注册）补 0，避免显示 NaN
     if base_summaries_df is not None and not base_summaries_df.empty:
         base = base_summaries_df.set_index("account_id")
         live_df = live_df.set_index("account_id")
         for col in ["total_trades", "total_commission", "total_stamp_tax"]:
             if col in base.columns:
-                live_df[col] = live_df.index.map(base[col].to_dict())
+                live_df[col] = live_df.index.map(base[col].to_dict()).fillna(0)
         live_df = live_df.reset_index()
 
     return live_df
