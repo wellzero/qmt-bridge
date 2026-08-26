@@ -37,6 +37,7 @@ nav:
   - 模拟交易:
       - 使用指南: paper-trading-guide.md
       - 架构详解: paper-trading.md
+  - Big QMT 迁移设计: big-qmt.md
   - WebSocket: websocket.md
   - Python 客户端 API:
       - 总览: api/index.md

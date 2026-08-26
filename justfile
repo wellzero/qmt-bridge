@@ -30,6 +30,10 @@ install-dashboard:
 install-all:
     pip install -e ".[full,docs,dashboard]"
 
+# 安装完整版 QMT（big QMT）交易后端依赖（xtquant_big_convert，docs/big-qmt.md）
+install-bigqmt:
+    pip install -e ".[bigqmt]"
+
 # ─────────────────────────── 服务 ───────────────────────────
 
 # 启动 API 服务（前台，Ctrl+C 停止）
@@ -47,6 +51,14 @@ serve-debug:
 # 启动定时下载调度器（独立进程，与 serve 分开运行）
 scheduler *ARGS:
     qmt-scheduler {{ARGS}}
+
+# 启动 API 服务（bigqmt 交易后端：完整版 QMT + xtquant_big_convert RPC）
+serve-bigqmt *ARGS:
+    qmt-server --trader-backend bigqmt {{ARGS}}
+
+# 部署 xtquant_big_convert 服务端到完整版 QMT 内置 Python（docs/big-qmt.md §3.5）
+deploy-bigqmt *ARGS:
+    python scripts/deploy_bigqmt_server.py {{ARGS}}
 
 # 启动定时下载调度器（调试模式）
 scheduler-debug:

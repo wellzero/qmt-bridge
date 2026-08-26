@@ -40,6 +40,9 @@ ws = ["websockets>=11.0"]
 client = ["websockets>=11.0"]
 notify = ["httpx>=0.25"]
 scripts = ["tqdm>=4.60"]
+# 完整版 QMT（big QMT）交易后端：xtquant_big_convert 客户端（Redis RPC），
+# 见 docs/big-qmt.md §3.1。要求 Python >= 3.8，满足本仓库 3.10+ 要求。
+bigqmt = ["xtquant-big-convert[redis]>=0.2.9"]
 full = [
     "qmt-bridge[server,ws,notify,scripts]",
 ]

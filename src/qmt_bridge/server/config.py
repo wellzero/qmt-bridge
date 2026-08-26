@@ -76,6 +76,12 @@ class Settings:
     trading_enabled: bool = False  # 是否启用交易模块
     mini_qmt_path: str = ""  # miniQMT 客户端安装路径
     trading_account_id: str = ""  # 交易资金账号 ID
+    # 交易后端：mini（XtQuantTrader 直连，默认）| bigqmt（xtquant_big_convert RPC）
+    # 见 docs/big-qmt.md §3.2
+    trader_backend: str = "mini"
+    # xtquant import shim 目录（bigqmt 后端行情通道，见 docs/big-qmt.md §3.3）；
+    # 为空时自动检测已安装 xtquant-big-convert 自带的 xtquant shim
+    bigqmt_shim_dir: str = ""
 
     # ---- 模拟交易模块配置 ----
     paper_trading_enabled: bool = False  # 是否启用模拟交易模块
@@ -133,6 +139,8 @@ class Settings:
             in ("1", "true", "yes"),
             mini_qmt_path=os.environ.get("QMT_BRIDGE_MINI_QMT_PATH", ""),
             trading_account_id=os.environ.get("QMT_BRIDGE_TRADING_ACCOUNT_ID", ""),
+            trader_backend=os.environ.get("QMT_BRIDGE_TRADER_BACKEND", "mini").lower(),
+            bigqmt_shim_dir=os.environ.get("QMT_BRIDGE_BIGQMT_SHIM_DIR", ""),
             # 模拟交易相关配置
             paper_trading_enabled=os.environ.get(
                 "QMT_BRIDGE_PAPER_TRADING_ENABLED", ""

@@ -38,6 +38,11 @@ def main():
         --api-key:               API 密钥，用于保护交易等敏感接口
         --mini-qmt-path:         miniQMT 安装目录路径（启用交易时必须指定）
         --account-id:            交易资金账号
+        --trader-backend:        交易后端：mini（默认，XtQuantTrader 直连）|
+                                 bigqmt（xtquant_big_convert RPC，完整版 QMT，
+                                 见 docs/big-qmt.md）
+        --bigqmt-shim-dir:       xtquant import shim 目录（bigqmt 后端行情通道，
+                                 默认自动检测已安装 xtquant-big-convert 自带的 shim）
     """
     # 优先从 .env 文件加载环境变量，使得后续参数默认值可以读取到 .env 中的配置
     _load_env_file()
@@ -98,8 +103,28 @@ def main():
         default=os.environ.get("QMT_BRIDGE_TRADING_ACCOUNT_ID", ""),
         help="Trading account ID",
     )
+    parser.add_argument(
+        "--trader-backend",
+        default=os.environ.get("QMT_BRIDGE_TRADER_BACKEND", "mini"),
+        choices=["mini", "bigqmt"],
+        help="Trading backend: mini (XtQuantTrader, default) or bigqmt "
+        "(xtquant_big_convert RPC, see docs/big-qmt.md)",
+    )
+    parser.add_argument(
+        "--bigqmt-shim-dir",
+        default=os.environ.get("QMT_BRIDGE_BIGQMT_SHIM_DIR", ""),
+        help="xtquant import shim dir for bigqmt market data (auto-detect if empty)",
+    )
 
     args = parser.parse_args()
+
+    # bigqmt 后端：在任何 xtquant 导入之前安装 import shim，
+    # 使本仓库的 `from xtquant import xtdata` 落到 xtquant_big_convert 通道
+    # （docs/big-qmt.md §3.3）。必须在 create_app / 惰性导入触发之前执行。
+    if args.trader_backend == "bigqmt":
+        from .bigqmt_shim import install_bigqmt_xtdata_shim
+
+        install_bigqmt_xtdata_shim(args.bigqmt_shim_dir or None)
 
     # 用命令行参数构建 Settings 对象（覆盖环境变量中的默认值）
     settings = Settings(
@@ -112,6 +137,8 @@ def main():
         paper_trading_enabled=getattr(args, "paper_trading", False),
         mini_qmt_path=args.mini_qmt_path,
         trading_account_id=args.account_id,
+        trader_backend=args.trader_backend,
+        bigqmt_shim_dir=args.bigqmt_shim_dir,
     )
     # 将配置对象设置为全局单例，供后续模块通过 get_settings() 获取
     reset_settings(settings)
@@ -159,6 +186,15 @@ def scheduler_main():
         qmt-scheduler --log-level debug  # 调试模式
     """
     _load_env_file()
+
+    # bigqmt 模式下调度器的下载管线同样走 xtquant import shim
+    # （scheduler.py 顶层 `from xtquant import xtdata`，docs/big-qmt.md §3.3）
+    if os.environ.get("QMT_BRIDGE_TRADER_BACKEND", "").lower() == "bigqmt":
+        from .bigqmt_shim import install_bigqmt_xtdata_shim
+
+        install_bigqmt_xtdata_shim(
+            os.environ.get("QMT_BRIDGE_BIGQMT_SHIM_DIR", "") or None
+        )
 
     parser = argparse.ArgumentParser(
         prog="qmt-scheduler",
