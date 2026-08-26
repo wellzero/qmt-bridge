@@ -133,8 +133,11 @@ def fetch_prices_from_server(
         headers["X-API-Key"] = api_key
 
     req = urllib.request.Request(url, headers=headers, method="GET")
+    # 局域网请求禁用系统代理：进程若继承 http_proxy 且 no_proxy 通配符
+    # （如 ``*.zicp.fun``）不被 urllib 识别，请求会被转发到代理并超时
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with opener.open(req, timeout=30) as resp:
             data = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         error_body = exc.read().decode("utf-8", errors="ignore")

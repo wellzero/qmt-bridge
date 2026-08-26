@@ -1,0 +1,2 @@
+netsh advfirewall firewall add rule name="QMT Bridge 8083" dir=in action=allow protocol=tcp localport=8083
+netsh advfirewall firewall add rule name="QMT Bridge 8083" dir=out action=allow protocol=tcp localport=8083
