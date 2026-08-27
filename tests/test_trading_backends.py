@@ -458,8 +458,20 @@ def bigqmt_app(monkeypatch):
     fake_pkg = types.ModuleType("xtquant")
     fake_xtdata = types.ModuleType("xtquant.xtdata")
     fake_pkg.xtdata = fake_xtdata
+    # downloader.py 顶层 `from xtquant import xtbson`（失败则回退 `import bson`）：
+    # 注入 fake，使路由测试不依赖 bson / 真实 xtquant 安装（hermetic）
+    fake_xtbson = types.ModuleType("xtquant.xtbson")
+
+    class _FakeBSON:
+        @staticmethod
+        def encode(param):
+            return b""
+
+    fake_xtbson.BSON = _FakeBSON
+    fake_pkg.xtbson = fake_xtbson
     monkeypatch.setitem(sys.modules, "xtquant", fake_pkg)
     monkeypatch.setitem(sys.modules, "xtquant.xtdata", fake_xtdata)
+    monkeypatch.setitem(sys.modules, "xtquant.xtbson", fake_xtbson)
 
     reset_settings(Settings(api_key="test-key", trading_enabled=True))
     from qmt_bridge.server.app import create_app

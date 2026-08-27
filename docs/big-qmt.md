@@ -120,7 +120,8 @@ bigqmt = ["xtquant-big-convert[redis]>=0.2.9"]
 `XtTraderManager` 已是对 xttrader 的 1:1 门面，抽取协议后并列为双后端：
 
 ```text
-TraderBackend (protocol, 覆盖 manager.py 全部方法签名)
+TraderBackend (protocol, 生命周期 + 能力位；业务方法全集与 manager.py 一致，
+               由 tests/test_trading_backends.py 的运行时方法全集断言保证)
   ├─ MiniQmtBackend  # 现有 XtQuantTrader 实现，原样保留
   └─ BigQmtAdapter   # 新增，基于 xtquant_compat；qmt-server（Windows）
                      # 进程内部的实现细节，Linux 策略完全不感知
@@ -204,14 +205,15 @@ xtquant_big_convert 的委托/成交/错误事件经 Redis pubsub（`exec_events
 | 委托 | `order_stock`(_async)、`cancel_order_stock`(_async)、`cancel_order_stock_sysid`(_async) | `submit_order` / `cancel_order`（受 `rpc_allow_order_methods` 门控，默认关） | ✅（sysid 变体需实测） |
 | 查询 | `query_stock_asset` / `query_stock_positions` / `query_stock_orders` / `query_stock_trades`、单笔委托/成交/持仓查询 | `get_asset` / `get_positions` / `query_orders` / `query_trades`（单笔查询为服务端本地遍历，无需远端支持） | ✅ |
 | 信用（两融） | `query_credit_detail`、`query_stk_compacts`、`query_credit_slo_code`、`query_credit_subjects`、`query_credit_assure` | margin 系列方法 | ⚠️ 需两融权限，否则返回空 |
-| 账户 | `query_account_status`、`query_account_infos`、`query_secu_account` | 单账户模型 | ⚠️ 单实例单账户，语义降级 |
+| 账户 | `query_account_status`、`query_account_infos` | 单账户模型 | ⚠️ 单实例单账户，语义降级（已实现：`account` 能力位） |
+| 账户（子账户） | `query_secu_account` | 无远端对应 | ❌ 降级 503（独立 `secu_account` 能力位，可推动上游） |
 | 银证转账 | `bank_transfer_in` / `bank_transfer_out`(_async)、`query_bank_info` / `query_bank_amount` / `query_bank_transfer_stream` | 无 | ❌ 降级 503 / 推动上游 |
 | 资金/证券划转 | `fund_transfer`、`secu_transfer` | 无 | ❌ 降级 503 / 推动上游 |
 | CTP 划转 | `ctp_transfer_option_to_future`、`ctp_transfer_future_to_option` | 无 | ❌ 降级 503 |
 | SMT 约定式交易 | `smt_query_quoter`、`smt_query_compact`、`smt_query_order`、`smt_negotiate_order_async`、`smt_appointment_order_async`、`smt_appointment_cancel_async`、`smt_compact_renewal_async`、`smt_compact_return_async` | 无 | ❌ 降级 503 |
 | IPO 打新 | `query_ipo_data`、`query_new_purchase_limit` | 无（上游明示"不能直接视为无损替换"） | ❌ 降级 503 |
 | COM 期权/期货 | `query_com_fund`、`query_com_position` | 无（完整版 QMT 为证券客户端） | ❌ 降级 503 |
-| 数据导出 | `export_data`、`query_data`、`sync_transaction_from_external` | `get_history_trade_detail_data` 可部分替代成交导出 | ⚠️ |
+| 数据导出 | `export_data`、`query_data`、`sync_transaction_from_external` | 无直接对应（`get_history_trade_detail_data` 仅可部分替代成交导出，需自行封装） | ❌ 降级 503 / 推动上游 |
 | 行情（xtdata） | K线、板块、财务、下载、`get_full_tick`、`subscribe_whole_quote` 等 | 117 个只读白名单方法 + FormulaServer 快路径 | ✅/⚠️ 见下 |
 
 ### 行情侧细节

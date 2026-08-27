@@ -2,8 +2,10 @@
 
 按 ``docs/big-qmt.md`` §3.3：``xtquant_big_convert`` 附带 ``xtquant`` import
 shim（把 ``xtquant.xtdata`` / ``xtquant.xttrader`` 代理到 compat 单例）。
-本仓库所有 ``from xtquant import xtdata`` 均为函数内惰性导入，因此只需在
-``cli.py`` 顶部（任何 xtquant 导入之前）把 shim 目录插到 ``sys.path`` 最前：
+本仓库 routers / ws / downloader / scheduler 共有 23 处**模块顶层**
+``from xtquant import xtdata``（非惰性，导入 app 即触发），因此必须在
+``cli.py`` 构建 app（``from .app import create_app``）与导入 scheduler
+**之前**把 shim 目录插到 ``sys.path`` 最前：
 
 .. code-block:: python
 

@@ -283,51 +283,57 @@ def test_router_endpoints(temp_data_dir: Path):
     reset_settings(settings)
 
     app = create_app(settings)
-    client = TestClient(app)
-    headers = {"X-API-Key": "test-key"}
+    # 必须进入 TestClient 上下文触发 lifespan，否则 paper_trader_manager
+    # 未初始化，路由全部 503
+    with TestClient(app) as client:
+        headers = {"X-API-Key": "test-key"}
 
-    # 创建账户
-    resp = client.post(
-        "/api/paper_accounts",
-        headers=headers,
-        json={
-            "account_id": "api_acc",
-            "initial_cash": 100000.0,
-            "price_source": "static",
-            "static_prices": {"000001.SZ": 10.0},
-            "commission_rate": 0.0,
-            "min_commission": 0.0,
-            "stamp_tax_rate": 0.0,
-        },
-    )
-    assert resp.status_code == 200
+        # 创建账户
+        resp = client.post(
+            "/api/paper_accounts",
+            headers=headers,
+            json={
+                "account_id": "api_acc",
+                "initial_cash": 100000.0,
+                "price_source": "static",
+                "static_prices": {"000001.SZ": 10.0},
+                "commission_rate": 0.0,
+                "min_commission": 0.0,
+                "stamp_tax_rate": 0.0,
+            },
+        )
+        assert resp.status_code == 200
 
-    # 下单
-    resp = client.post(
-        "/api/paper_trading/order",
-        headers=headers,
-        json={
-            "account_id": "api_acc",
-            "stock_code": "000001.SZ",
-            "order_type": STOCK_BUY,
-            "order_volume": 1000,
-            "price_type": FIX_PRICE,
-            "price": 10.0,
-        },
-    )
-    assert resp.status_code == 200
-    assert resp.json()["order_id"] > 0
+        # 下单
+        resp = client.post(
+            "/api/paper_trading/order",
+            headers=headers,
+            json={
+                "account_id": "api_acc",
+                "stock_code": "000001.SZ",
+                "order_type": STOCK_BUY,
+                "order_volume": 1000,
+                "price_type": FIX_PRICE,
+                "price": 10.0,
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["order_id"] > 0
 
-    # 查询资产
-    resp = client.get("/api/paper_trading/asset?account_id=api_acc", headers=headers)
-    assert resp.status_code == 200
-    assert resp.json()["data"]["cash"] == pytest.approx(90000.0)
+        # 查询资产
+        resp = client.get(
+            "/api/paper_trading/asset?account_id=api_acc", headers=headers
+        )
+        assert resp.status_code == 200
+        assert resp.json()["data"]["cash"] == pytest.approx(90000.0)
 
-    # 查询业绩
-    resp = client.get("/api/paper_trading/summary?account_id=api_acc", headers=headers)
-    assert resp.status_code == 200
-    data = resp.json()["data"]
-    assert data["total_asset"] == pytest.approx(100000.0)
+        # 查询业绩
+        resp = client.get(
+            "/api/paper_trading/summary?account_id=api_acc", headers=headers
+        )
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert data["total_asset"] == pytest.approx(100000.0)
 
 
 def test_router_download_prices_with_mock(temp_data_dir: Path):
@@ -351,46 +357,51 @@ def test_router_download_prices_with_mock(temp_data_dir: Path):
     reset_settings(settings)
 
     app = create_app(settings)
-    client = TestClient(app)
-    headers = {"X-API-Key": "test-key"}
+    # 必须进入 TestClient 上下文触发 lifespan，否则 paper_trader_manager
+    # 未初始化，路由全部 503
+    with TestClient(app) as client:
+        headers = {"X-API-Key": "test-key"}
 
-    # 创建账户
-    resp = client.post(
-        "/api/paper_accounts",
-        headers=headers,
-        json={
-            "account_id": "api_download",
-            "initial_cash": 100000.0,
-            "price_source": "static",
-            "static_prices": {},
-        },
-    )
-    assert resp.status_code == 200
-
-    mock_xtdata = MagicMock()
-    mock_xtdata.get_full_tick.return_value = {
-        "000001.SZ": {"lastPrice": 12.34},
-        "600519.SH": {"close": 567.89},
-    }
-    mock_xtquant_module = MagicMock()
-    mock_xtquant_module.xtdata = mock_xtdata
-
-    with patch.dict("sys.modules", {"xtquant": mock_xtquant_module}):
+        # 创建账户
         resp = client.post(
-            "/api/paper_accounts/api_download/download_prices",
+            "/api/paper_accounts",
             headers=headers,
-            json={"stock_codes": ["000001.SZ", "600519.SH"]},
+            json={
+                "account_id": "api_download",
+                "initial_cash": 100000.0,
+                "price_source": "static",
+                "static_prices": {},
+            },
         )
+        assert resp.status_code == 200
 
-    assert resp.status_code == 200
-    data = resp.json()["data"]
-    assert data["000001.SZ"] == pytest.approx(12.34)
-    assert data["600519.SH"] == pytest.approx(567.89)
+        mock_xtdata = MagicMock()
+        mock_xtdata.get_full_tick.return_value = {
+            "000001.SZ": {"lastPrice": 12.34},
+            "600519.SH": {"close": 567.89},
+        }
+        mock_xtquant_module = MagicMock()
+        mock_xtquant_module.xtdata = mock_xtdata
 
-    # 验证配置已持久化
-    resp = client.get("/api/paper_accounts/api_download", headers=headers)
-    assert resp.status_code == 200
-    assert resp.json()["data"]["static_prices"]["000001.SZ"] == pytest.approx(12.34)
+        with patch.dict("sys.modules", {"xtquant": mock_xtquant_module}):
+            resp = client.post(
+                "/api/paper_accounts/api_download/download_prices",
+                headers=headers,
+                json={"stock_codes": ["000001.SZ", "600519.SH"]},
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert data["000001.SZ"] == pytest.approx(12.34)
+        assert data["600519.SH"] == pytest.approx(567.89)
+
+        # 验证配置已持久化
+        resp = client.get("/api/paper_accounts/api_download", headers=headers)
+        assert resp.status_code == 200
+        assert (
+            resp.json()["data"]["static_prices"]["000001.SZ"]
+            == pytest.approx(12.34)
+        )
 
 
 def test_static_price_source_download_with_mock():

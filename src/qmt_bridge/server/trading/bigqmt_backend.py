@@ -96,7 +96,11 @@ class BigQmtAdapter:
         compat = self._load_compat()
 
         # compat.configure() 原地更新 xt_trader / xtdata 单例，
-        # 与 xtdata import shim 共享同一 RPC 客户端
+        # 与 xtdata import shim 共享同一 RPC 客户端。
+        # account_id kwarg 已对照上游 v0.2.9 wheel 验证：
+        # configure(account_id=None, redis_client=None, redis_config=None,
+        #           timeout_seconds=None)，配置经 bigqmt_signal_trader_local_config
+        # 模块或 BIGQMT_* 环境变量读取。
         compat.configure(account_id=self.account_id or None)
         self._trader = compat.xt_trader
         if not self.account_id:

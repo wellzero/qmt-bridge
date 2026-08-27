@@ -139,11 +139,14 @@ def capability_of(method_name: str) -> str | None:
 
 @runtime_checkable
 class TraderBackend(Protocol):
-    """交易后端协议 ── 覆盖 XtTraderManager 全部公开方法签名。
+    """交易后端协议 ── 生命周期 + 能力位；业务方法全集与 XtTraderManager 一致。
 
-    两个实现（MiniQmtBackend / BigQmtAdapter）都必须实现本协议的完整方法集，
-    不支持的方法直接抛 ``UnsupportedOperation`` —— 单一事实来源，
-    路由层无需感知后端差异。
+    协议只显式声明 connect/disconnect/supports；业务方法签名**不在协议里
+    重复维护**（避免与 mini_backend/bigqmt_backend 三处签名漂移），方法全集
+    由运行时断言保证：``tests/test_trading_backends.py::
+    test_backends_implement_full_method_surface`` 按 ``CAPABILITY_METHODS``
+    分组逐一核对双后端。不支持的方法直接抛 ``UnsupportedOperation``
+    —— 单一事实来源，路由层无需感知后端差异。
 
     Attributes:
         name: 后端标识（"mini" / "bigqmt"），用于日志与错误信息。
@@ -163,7 +166,5 @@ class TraderBackend(Protocol):
         """判断后端是否声明支持某能力位分组。"""
         ...
 
-    # 其余方法签名（委托/查询/信用/账户/银证/划转/CTP/SMT/IPO/COM/导出）
-    # 与 XtTraderManager 完全一致，见 mini_backend.py / bigqmt_backend.py
-    # 的具体实现；协议层面以运行时方法全集断言（tests/test_trading_backends.py）
-    # 保证双后端不漏方法，避免三处重复维护同一套签名。
+    # 其余业务方法签名见 mini_backend.py / bigqmt_backend.py 的具体实现
+    # （方法全集由 docstring 所述的运行时断言保证）。
