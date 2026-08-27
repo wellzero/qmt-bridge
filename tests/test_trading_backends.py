@@ -586,10 +586,16 @@ def test_install_shim_inserts_parent_at_sys_path_front(tmp_path, monkeypatch):
 
 
 def test_install_shim_rejects_real_xtquant_dir(tmp_path, monkeypatch):
-    """非 shim 目录（真实 xtquant）不安装，返回 None。"""
+    """非 shim 目录（真实 xtquant）不安装，返回 None。
+
+    屏蔽 site-packages 回退（sys.modules 置 None 即 ImportError），
+    否则本机真实安装 xtquant-big-convert 后回退会命中其顶层 shim，
+    测试随环境翻转。
+    """
     from qmt_bridge.server import bigqmt_shim
 
     monkeypatch.delenv("QMT_BRIDGE_BIGQMT_SHIM_DIR", raising=False)
+    monkeypatch.setitem(sys.modules, "bigqmt_signal_trader", None)
     _write_shim_dir(tmp_path, real=True)
     assert bigqmt_shim.install_bigqmt_xtdata_shim(str(tmp_path)) is None
 
