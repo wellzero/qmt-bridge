@@ -8,7 +8,25 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from data_loader import derive_positions, load_all_orders, load_summary
+from data_loader import load_all_orders, load_summary
+from pricing import calculate_live_pnl, get_price_source_label, resolve_prices
+
+
+def render_big_title(title: str) -> None:
+    """渲染大号页面标题。"""
+    st.markdown(
+        f"""
+        <style>
+        .big-title {{
+            font-size: 3rem !important;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }}
+        </style>
+        <h1 class="big-title">{title}</h1>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_account_cards(summaries_df: pd.DataFrame) -> None:
@@ -21,8 +39,10 @@ def render_account_cards(summaries_df: pd.DataFrame) -> None:
     total_asset = summaries_df["total_asset"].sum()
     total_pnl = summaries_df["total_pnl"].sum()
     total_trades = int(summaries_df["total_trades"].sum())
+    total_initial_cash = summaries_df["initial_cash"].sum()
+    total_return_rate = (total_pnl / total_initial_cash) if total_initial_cash else 0.0
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         st.metric("账户数量", total_accounts)
     with col2:
@@ -30,13 +50,20 @@ def render_account_cards(summaries_df: pd.DataFrame) -> None:
     with col3:
         st.metric("总盈亏", f"{total_pnl:,.2f}", delta=f"{total_pnl:,.2f}")
     with col4:
+        st.metric("总收益率", f"{total_return_rate * 100:.2f}%")
+    with col5:
         st.metric("总成交笔数", total_trades)
 
 
-def render_accounts_table(summaries_df: pd.DataFrame) -> None:
-    """渲染所有账户摘要表格。"""
+def render_accounts_table(
+    summaries_df: pd.DataFrame, key: str = "accounts_table"
+) -> str | None:
+    """渲染所有账户摘要表格，支持点击单行选择账户。
+
+    返回被选中行的 ``account_id``；未选择时返回 ``None``。
+    """
     if summaries_df.empty:
-        return
+        return None
 
     display_df = summaries_df.copy()
     rename_map = {
@@ -56,13 +83,28 @@ def render_accounts_table(summaries_df: pd.DataFrame) -> None:
     display_df = display_df[[c for c in rename_map if c in display_df.columns]]
     display_df = display_df.rename(columns=rename_map)
 
-    # 格式化收益率
+    # 总收益率保持数值类型，由 column_config 格式化显示，确保可正确排序
     if "总收益率" in display_df.columns:
-        display_df["总收益率"] = display_df["总收益率"].apply(
-            lambda x: f"{x * 100:.2f}%" if pd.notna(x) else "-"
-        )
+        display_df["总收益率"] = display_df["总收益率"] * 100
 
-    st.dataframe(display_df, use_container_width=True, hide_index=True)
+    event = st.dataframe(
+        display_df,
+        use_container_width=True,
+        hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row",
+        key=key,
+        column_config={
+            "总收益率": st.column_config.NumberColumn(
+                "总收益率", format="%.2f%%", help="按数值排序"
+            )
+        },
+    )
+    selected = event.selection
+    if selected and selected.get("rows"):
+        row_idx = selected["rows"][0]
+        return str(summaries_df.iloc[row_idx]["account_id"])
+    return None
 
 
 def render_account_detail(
@@ -74,19 +116,73 @@ def render_account_detail(
 
     st.subheader(f"账户：{account_id}")
 
-    # ── 摘要指标 ────────────────────────────────────────────────────
-    col1, col2, col3, col4, col5 = st.columns(5)
-    with col1:
-        st.metric("总资产", f"{float(summary.get('total_asset', 0)):,.2f}")
-    with col2:
-        st.metric("可用资金", f"{float(summary.get('cash', 0)):,.2f}")
-    with col3:
-        st.metric("持仓市值", f"{float(summary.get('market_value', 0)):,.2f}")
-    with col4:
-        st.metric("总盈亏", f"{float(summary.get('total_pnl', 0)):,.2f}")
-    with col5:
-        rate = float(summary.get("total_return_rate", 0)) * 100
-        st.metric("总收益率", f"{rate:.2f}%")
+    # ── 实时盈亏（基于当前/收盘最新价）─────────────────────────────────
+    initial_cash = float(
+        account_config.get("initial_cash", summary.get("initial_cash", 100_000))
+    )
+    live_positions_df = pd.DataFrame()
+    live: dict[str, Any] = {}
+    prices: dict[str, float] = {}
+    if not orders_df.empty:
+        stock_codes = orders_df["stock_code"].dropna().unique().tolist()
+        prices = resolve_prices(data_dir, stock_codes, account_config)
+        live = calculate_live_pnl(orders_df, prices, initial_cash)
+        live_positions_df = live.get("positions", pd.DataFrame())
+
+    if live:
+        price_label = get_price_source_label(data_dir)
+        st.caption(f"价格来源：{price_label}")
+
+        col1, col2, col3, col4, col5 = st.columns(5)
+        with col1:
+            st.metric("总资产", f"{live['total_asset']:,.2f}")
+        with col2:
+            st.metric("可用资金", f"{live['cash']:,.2f}")
+        with col3:
+            st.metric("持仓市值", f"{live['market_value']:,.2f}")
+        with col4:
+            st.metric("总盈亏", f"{live['total_pnl']:,.2f}")
+        with col5:
+            st.metric("总收益率", f"{live['total_return_rate'] * 100:.2f}%")
+
+        if not live_positions_df.empty:
+            display_positions = live_positions_df.copy()
+            display_positions["current_price"] = display_positions[
+                "current_price"
+            ].fillna(display_positions["traded_price"])
+            display_positions = display_positions.rename(
+                columns={
+                    "stock_code": "股票代码",
+                    "volume": "持仓量",
+                    "avg_cost": "成本均价",
+                    "current_price": "当前价",
+                    "market_value": "市值",
+                    "unrealized_pnl": "浮动盈亏",
+                    "trade_date": "最后交易日期",
+                    "order_time": "最后交易时间",
+                }
+            )
+            st.dataframe(display_positions, use_container_width=True, hide_index=True)
+        else:
+            st.info("当前无持仓。")
+    else:
+        # 无委托记录时，回退到 summary.json；仅有 config 注册的账户
+        # （尚无 summary.json）用初始资金兜底，避免全部显示为 0
+        col1, col2, col3, col4, col5 = st.columns(5)
+        with col1:
+            st.metric(
+                "总资产", f"{float(summary.get('total_asset', initial_cash)):,.2f}"
+            )
+        with col2:
+            st.metric("可用资金", f"{float(summary.get('cash', initial_cash)):,.2f}")
+        with col3:
+            st.metric("持仓市值", f"{float(summary.get('market_value', 0)):,.2f}")
+        with col4:
+            st.metric("总盈亏", f"{float(summary.get('total_pnl', 0)):,.2f}")
+        with col5:
+            rate = float(summary.get("total_return_rate", 0)) * 100
+            st.metric("总收益率", f"{rate:.2f}%")
+        st.info("暂无委托记录，无法估算实时盈亏。")
 
     # ── 配置信息 ────────────────────────────────────────────────────
     with st.expander("账户配置"):
@@ -115,36 +211,70 @@ def render_account_detail(
             errors="coerce",
         )
         chart_df = orders_df.dropna(subset=["datetime"]).sort_values("datetime")
+        chart_df["total_asset"] = (
+            chart_df["account_cash"] + chart_df["account_market_value"]
+        )
+
+        def _order_hover_text(row: pd.Series) -> str:
+            """为每个委托点生成悬浮提示文本。"""
+            lines = [
+                f"时间: {row['datetime']:%Y-%m-%d %H:%M:%S}",
+                f"股票: {row.get('stock_code', '-')}",
+                f"方向: {row.get('order_type_label', '-')}",
+            ]
+            if pd.notna(row.get("order_volume")):
+                lines.append(f"委托量: {row['order_volume']}")
+            if pd.notna(row.get("traded_volume")):
+                lines.append(f"成交量: {row['traded_volume']}")
+            if pd.notna(row.get("traded_price")):
+                lines.append(f"成交价: {row['traded_price']:.3f}")
+            if pd.notna(row.get("commission")):
+                lines.append(f"手续费: {row['commission']:.2f}")
+            if pd.notna(row.get("stamp_tax")):
+                lines.append(f"印花税: {row['stamp_tax']:.2f}")
+            if row.get("status"):
+                lines.append(f"状态: {row['status']}")
+            lines.append(f"总资产: {row['total_asset']:.2f}")
+            return "<br>".join(lines)
+
+        chart_df["hover_text"] = chart_df.apply(_order_hover_text, axis=1)
 
         fig = go.Figure()
+
+        # 总资产曲线
         fig.add_trace(
             go.Scatter(
                 x=chart_df["datetime"],
-                y=chart_df["account_cash"],
-                mode="lines+markers",
-                name="可用资金",
-            )
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=chart_df["datetime"],
-                y=chart_df["account_market_value"],
-                mode="lines+markers",
-                name="持仓市值",
-            )
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=chart_df["datetime"],
-                y=chart_df["account_cash"] + chart_df["account_market_value"],
-                mode="lines+markers",
+                y=chart_df["total_asset"],
+                mode="lines",
                 name="总资产",
+                line=dict(color="#1f77b4", width=2),
+                hovertemplate="总资产: %{y:,.2f}<br>时间: %{x}<extra>资产</extra>",
             )
         )
+
+        # 委托标记点，悬浮显示委托详情
+        fig.add_trace(
+            go.Scatter(
+                x=chart_df["datetime"],
+                y=chart_df["total_asset"],
+                mode="markers",
+                name="委托",
+                marker=dict(
+                    size=10,
+                    color="#ff7f0e",
+                    symbol="diamond",
+                    line=dict(width=1, color="#ffffff"),
+                ),
+                hovertemplate="%{text}<extra>委托详情</extra>",
+                text=chart_df["hover_text"],
+            )
+        )
+
         fig.update_layout(
-            title="资产变化趋势",
-            xaxis_title="时间",
-            yaxis_title="金额",
+            title="总资产与委托时点（悬停查看委托详情）",
+            xaxis_title="日期时间",
+            yaxis_title="总资产",
             legend=dict(
                 orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
             ),
@@ -161,6 +291,27 @@ def render_account_detail(
     if orders_df.empty:
         st.info("暂无委托记录。")
     else:
+        display_orders = orders_df.copy()
+        # 若已解析到价格，为每笔委托补充最新价与按最新价估算的盈亏
+        if live:
+            display_orders["current_price"] = display_orders["stock_code"].map(prices)
+            display_orders["current_price"] = display_orders["current_price"].fillna(
+                display_orders["traded_price"]
+            )
+
+            def _order_pnl(row: pd.Series) -> float:
+                """按最新价估算单笔委托盈亏：买入看多、卖出看空。"""
+                price = row.get("current_price")
+                trade_price = row.get("traded_price")
+                volume = row.get("traded_volume")
+                order_type = str(row.get("order_type", ""))
+                if pd.isna(price) or pd.isna(trade_price) or pd.isna(volume):
+                    return 0.0
+                direction = 1.0 if order_type == "23" else -1.0
+                return float((price - trade_price) * volume * direction)
+
+            display_orders["pnl"] = display_orders.apply(_order_pnl, axis=1)
+
         display_cols = [
             "trade_date",
             "order_time",
@@ -171,11 +322,13 @@ def render_account_detail(
             "price",
             "traded_volume",
             "traded_price",
+            "current_price",
+            "pnl",
             "commission",
             "stamp_tax",
             "status",
         ]
-        display_cols = [c for c in display_cols if c in orders_df.columns]
+        display_cols = [c for c in display_cols if c in display_orders.columns]
         rename = {
             "trade_date": "日期",
             "order_time": "时间",
@@ -186,30 +339,14 @@ def render_account_detail(
             "price": "委托价",
             "traded_volume": "成交量",
             "traded_price": "成交价",
+            "current_price": "最新价",
+            "pnl": "估算盈亏",
             "commission": "手续费",
             "stamp_tax": "印花税",
             "status": "状态",
         }
         st.dataframe(
-            orders_df[display_cols].rename(columns=rename),
+            display_orders[display_cols].rename(columns=rename),
             use_container_width=True,
             hide_index=True,
         )
-
-    # ── 推导持仓 ────────────────────────────────────────────────────
-    st.markdown("#### 推导持仓（由委托记录计算，仅供参考）")
-    positions_df = derive_positions(orders_df)
-    if positions_df.empty:
-        st.info("暂无持仓。")
-    else:
-        positions_df = positions_df.rename(
-            columns={
-                "stock_code": "股票代码",
-                "volume": "持仓量",
-                "traded_price": "参考成交价",
-                "market_value": "参考市值",
-                "trade_date": "最后交易日期",
-                "order_time": "最后交易时间",
-            }
-        )
-        st.dataframe(positions_df, use_container_width=True, hide_index=True)

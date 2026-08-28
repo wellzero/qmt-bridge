@@ -5,7 +5,7 @@
 """
 
 from fastapi import APIRouter, Query
-from xtquant import xtdata
+from ..xtdata_source import xtdata
 
 from ..helpers import _numpy_to_python, ok_response
 from ..models import (

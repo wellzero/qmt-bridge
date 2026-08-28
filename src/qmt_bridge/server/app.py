@@ -38,7 +38,8 @@ async def _lifespan(app: FastAPI):
     """管理 FastAPI 应用的生命周期（启动/关闭）。
 
     启动阶段（yield 之前）：
-    1. 若启用交易功能，初始化 XtTraderManager 并连接 miniQMT 客户端
+    1. 若启用交易功能，按 ``trader_backend`` 初始化 XtTraderManager
+       （mini → XtQuantTrader 直连 miniQMT；bigqmt → xtquant_big_convert RPC）
     2. 若启用通知功能，启动 NotifierManager（飞书/Webhook 通知后端）
 
     关闭阶段（yield 之后）：
@@ -50,21 +51,22 @@ async def _lifespan(app: FastAPI):
     """
     settings: Settings = get_settings()
 
-    # 如果配置中启用了交易模块，则初始化 xttrader 交易管理器
+    # 如果配置中启用了交易模块，则初始化交易管理器
     if settings.trading_enabled:
         try:
             from .trading.manager import XtTraderManager
 
-            # 创建交易管理器实例，传入 miniQMT 安装路径和资金账号
-            manager = XtTraderManager(
+            # 按 --trader-backend 选定后端（mini / bigqmt，docs/big-qmt.md §3.2）
+            manager = XtTraderManager.create(
+                trader_backend=settings.trader_backend,
                 mini_qmt_path=settings.mini_qmt_path,
                 account_id=settings.trading_account_id,
             )
-            # 连接到 miniQMT 客户端（底层调用 xttrader.connect()）
+            # 连接交易后端（mini: xttrader.connect()；bigqmt: RPC ping）
             manager.connect()
             # 将管理器存储到 app.state，供各路由通过依赖注入获取
             app.state.trader_manager = manager
-            logger.info("Trading module initialized")
+            logger.info("Trading module initialized (backend=%s)", manager.backend_name)
         except Exception:
             logger.exception("Failed to initialize trading module")
             app.state.trader_manager = None
@@ -169,6 +171,44 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # 全局 xtdata 串行化中间件（仅拦截调用 xtdata 的 /api/* 端点）
     app.add_middleware(XtdataSerializerMiddleware)
+
+    # 能力位降级：bigqmt 后端无远端 RPC 支持的交易接口 → 503
+    # （docs/big-qmt.md §3.4；错误信息注明等待远端支持）
+    from fastapi import Request
+    from fastapi.responses import JSONResponse
+
+    from .trading.backend import UnsupportedOperation
+
+    @app.exception_handler(UnsupportedOperation)
+    async def _unsupported_operation_handler(
+        request: Request, exc: UnsupportedOperation
+    ):
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": str(exc),
+                "backend": exc.backend,
+                "method": exc.method,
+            },
+        )
+
+    # bigqmt RPC 超时 → 504。RPC-only 端点（get_market_data /
+    # get_market_last_trade_date 等未映射进 FormulaServer 白名单的调用）在
+    # QMT 端策略未运行（休市/实例停止）时会等满超时再抛 TimeoutError，
+    # 此前直接 500 且无任何线索；统一转成带提示的 504。
+    # 不做重试：超时本身即"远端不在"，重试只会拖长响应。
+    @app.exception_handler(TimeoutError)
+    async def _rpc_timeout_handler(request: Request, exc: TimeoutError):
+        return JSONResponse(
+            status_code=504,
+            content={
+                "detail": "upstream RPC timeout: %s" % exc,
+                "hint": (
+                    "bigqmt RPC-only 接口需要 QMT 端策略实例运行（交易时段）；"
+                    "行情 FormulaServer 直连部分不受影响"
+                ),
+            },
+        )
 
     # ------------------------------------------------------------------
     # 注册数据查询路由（始终可用，无需启用交易模块）

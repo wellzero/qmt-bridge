@@ -105,9 +105,24 @@ class PaperTradingStorage:
     """
 
     def __init__(self, data_dir: Path | str | None = None):
+        self._config_path_override: Path | None = None
         self.data_dir = Path(data_dir or Path.cwd() / "data")
-        self.paper_trading_dir = self._resolve_paper_trading_dir(self.data_dir)
         self._ensure_dirs()
+
+    @property
+    def data_dir(self) -> Path:
+        """数据根目录；重新赋值时会同步重算 ``paper_trading_dir``。
+
+        历史上有测试在构造后直接改 ``data_dir`` 期望重定向存储位置，
+        但旧实现只在 ``__init__`` 计算 ``paper_trading_dir``，导致写入
+        仍落在原目录（曾造成测试覆盖生产 ``config.json``），故改为属性。
+        """
+        return self._data_dir
+
+    @data_dir.setter
+    def data_dir(self, value: Path | str) -> None:
+        self._data_dir = Path(value)
+        self.paper_trading_dir = self._resolve_paper_trading_dir(self._data_dir)
 
     @staticmethod
     def _resolve_paper_trading_dir(data_dir: Path) -> Path:
@@ -132,7 +147,14 @@ class PaperTradingStorage:
 
     @property
     def config_path(self) -> Path:
+        if self._config_path_override is not None:
+            return self._config_path_override
         return self.paper_trading_dir / "config.json"
+
+    @config_path.setter
+    def config_path(self, value: Path | str) -> None:
+        """覆盖默认的 ``config.json`` 路径（供 ``PaperTraderManager`` 使用）。"""
+        self._config_path_override = Path(value)
 
     def read_config(self) -> dict[str, Any]:
         if not self.config_path.exists():
@@ -253,21 +275,28 @@ class PaperTradingStorage:
     # ── 账户数据清理 ──
 
     def remove_account_files(self, account_id: str) -> None:
-        """删除某账户的 CSV、摘要文件及空账户目录。"""
+        """删除某账户的全部委托 CSV、摘要文件及空账户目录。
+
+        委托流水按日期分文件存储（``orders_YYYYMMDD.csv``），
+        必须删除 ``order/`` 目录下全部文件，仅删当日文件会残留历史委托，
+        导致重置后仪表盘按历史流水推导出幽灵持仓。
+        """
         account_dir = self._account_dir(account_id)
-        for path in [
-            self.summary_path(account_id),
-            self.orders_path(account_id),
-        ]:
+        paths = [self.summary_path(account_id)]
+        orders_dir = account_dir / "order"
+        if orders_dir.exists():
+            paths.extend(sorted(orders_dir.glob("orders_*.csv")))
+        for path in paths:
             try:
                 path.unlink(missing_ok=True)
                 logger.debug("已删除账户 %s 文件: %s", account_id, path)
             except Exception:
                 logger.exception("删除文件失败: %s", path)
-        # 尝试删除空账户目录
-        try:
-            if account_dir.exists() and not any(account_dir.iterdir()):
-                account_dir.rmdir()
-                logger.debug("已删除空账户目录: %s", account_dir)
-        except Exception:
-            logger.exception("删除账户目录失败: %s", account_dir)
+        # 尝试删除空的 order/、summary/ 子目录及账户目录
+        for directory in [orders_dir, account_dir / "summary", account_dir]:
+            try:
+                if directory.exists() and not any(directory.iterdir()):
+                    directory.rmdir()
+                    logger.debug("已删除空目录: %s", directory)
+            except Exception:
+                logger.exception("删除目录失败: %s", directory)

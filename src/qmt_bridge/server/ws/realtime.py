@@ -27,7 +27,7 @@ import asyncio
 import json
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from xtquant import xtdata
+from ..xtdata_source import xtdata
 
 from ..helpers import _numpy_to_python
 

@@ -6,7 +6,7 @@
 """
 
 from fastapi import APIRouter, Query
-from xtquant import xtdata
+from ..xtdata_source import xtdata
 
 from ..helpers import _financial_data_to_records, _numpy_to_python
 

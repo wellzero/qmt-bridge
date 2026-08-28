@@ -24,7 +24,7 @@ import functools
 import logging
 from dataclasses import asdict
 
-from xtquant import xtdata
+from .xtdata_source import xtdata
 
 from .config import Settings
 from .downloader import (

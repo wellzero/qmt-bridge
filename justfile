@@ -30,6 +30,10 @@ install-dashboard:
 install-all:
     pip install -e ".[full,docs,dashboard]"
 
+# 安装完整版 QMT（big QMT）交易后端依赖（xtquant_big_convert，docs/big-qmt.md）
+install-bigqmt:
+    pip install -e ".[bigqmt]"
+
 # ─────────────────────────── 服务 ───────────────────────────
 
 # 启动 API 服务（前台，Ctrl+C 停止）
@@ -47,6 +51,37 @@ serve-debug:
 # 启动定时下载调度器（独立进程，与 serve 分开运行）
 scheduler *ARGS:
     qmt-scheduler {{ARGS}}
+
+# 启动 API 服务（选择交易后端：mini=xtquant 直连 miniQMT | bigqmt=完整版 QMT RPC）
+# 走 scripts/serve_qmt_server.ps1：bigqmt 自动设账号/Redis 环境变量并预检（xtdata 经 xtdata_source 解析）
+# 使用手册: scripts/scripts-user-guide.md
+# 例: just serve-backend bigqmt | just serve-backend mini -Port 18889
+serve-backend backend="mini" *ARGS:
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts\serve_qmt_server.ps1 -Backend {{backend}} {{ARGS}}
+
+# 启动 API 服务（bigqmt 交易后端：完整版 QMT + xtquant_big_convert RPC）
+# 推荐用 just serve-backend bigqmt（同一入口，可换 -Port/-AccountId 等）
+serve-bigqmt *ARGS:
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts\serve_qmt_server.ps1 -Backend bigqmt {{ARGS}}
+
+# bigqmt 全链路一键拉起：Redis 没起自动拉起 + QMT 客户端没跑自动启动 + qmt-server（bigqmt 后端）
+# 例: just start-bigqmt-service | just start-bigqmt-service -Port 18889 -Trading
+start-bigqmt-service *ARGS:
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts\start_bigqmt_service.ps1 {{ARGS}}
+
+# 下载历史行情到完整版 QMT 数据仓（mini通道下载 + 同步到 big 仓，bigqmt 后端即可读）
+# 例: just download-bigqmt --stocks 000300.SH,600519.SH --periods 1d,1m --start 20250101
+download-bigqmt *ARGS:
+    py scripts/download_bigqmt_data.py {{ARGS}}
+
+# 部署 xtquant_big_convert 服务端到完整版 QMT 内置 Python（docs/big-qmt.md §3.5）
+deploy-bigqmt *ARGS:
+    python scripts/deploy_bigqmt_server.py {{ARGS}}
+
+# 一键部署 bigqmt 全套（依赖 + Redis + QMT 侧文件 + 自检；手工 UI 步骤见 deploy-user-guide.md §3.5）
+# 例: just deploy-bigqmt-full  |  just deploy-bigqmt-full -QmtPythonDir "D:\国金QMT\python" -AccountId 12345678
+deploy-bigqmt-full *ARGS:
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy_bigqmt_windows.ps1 {{ARGS}}
 
 # 启动定时下载调度器（调试模式）
 scheduler-debug:
@@ -83,6 +118,18 @@ download-5m-recent *ARGS:
 download-paper-prices *ARGS:
     python scripts/download_paper_prices.py {{ARGS}}
 
+# 诊断模拟交易账户在仪表盘中的可见性
+diagnose-paper-accounts *ARGS:
+    python scripts/diagnose_paper_accounts.py {{ARGS}}
+
+# 更新模拟交易共享价格缓存（盘中最新价）
+update-paper-price-cache *ARGS:
+    python scripts/update_paper_price_cache.py {{ARGS}}
+
+# 更新模拟交易当日收盘价缓存
+update-paper-close-price *ARGS:
+    python scripts/update_paper_price_cache.py --close {{ARGS}}
+
 # ─────────────────────────── 仪表盘 ─────────────────────────
 
 # 启动可视化仪表盘（http://localhost:8501）
@@ -91,7 +138,7 @@ dashboard:
 
 # 启动模拟交易结果仪表盘（http://localhost:8501）
 paper-dashboard:
-    streamlit run dashboard/paper-trading/app.py
+    streamlit run dashboard/paper-trading/trading_summary.py
 
 # ─────────────────────────── 文档 ───────────────────────────
 

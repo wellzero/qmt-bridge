@@ -38,6 +38,9 @@ def main():
         --api-key:               API 密钥，用于保护交易等敏感接口
         --mini-qmt-path:         miniQMT 安装目录路径（启用交易时必须指定）
         --account-id:            交易资金账号
+        --trader-backend:        交易后端：mini（默认，XtQuantTrader 直连）|
+                                 bigqmt（xtquant_big_convert RPC，完整版 QMT，
+                                 见 docs/big-qmt.md）
     """
     # 优先从 .env 文件加载环境变量，使得后续参数默认值可以读取到 .env 中的配置
     _load_env_file()
@@ -98,8 +101,18 @@ def main():
         default=os.environ.get("QMT_BRIDGE_TRADING_ACCOUNT_ID", ""),
         help="Trading account ID",
     )
-
+    parser.add_argument(
+        "--trader-backend",
+        default=os.environ.get("QMT_BRIDGE_TRADER_BACKEND", "mini"),
+        choices=["mini", "bigqmt"],
+        help="Trading backend: mini (XtQuantTrader, default) or bigqmt "
+        "(xtquant_big_convert RPC, see docs/big-qmt.md)",
+    )
     args = parser.parse_args()
+
+    # bigqmt 后端的行情通道：routers/ws/downloader 顶层的 xtdata 导入经
+    # xtdata_source 按本参数解析到 xtquant_big_convert（docs/big-qmt.md §3.3
+    # v2）。必须在 create_app / 惰性导入触发之前 reset_settings（下方即做）。
 
     # 用命令行参数构建 Settings 对象（覆盖环境变量中的默认值）
     settings = Settings(
@@ -112,6 +125,7 @@ def main():
         paper_trading_enabled=getattr(args, "paper_trading", False),
         mini_qmt_path=args.mini_qmt_path,
         trading_account_id=args.account_id,
+        trader_backend=args.trader_backend,
     )
     # 将配置对象设置为全局单例，供后续模块通过 get_settings() 获取
     reset_settings(settings)
@@ -159,6 +173,10 @@ def scheduler_main():
         qmt-scheduler --log-level debug  # 调试模式
     """
     _load_env_file()
+
+    # bigqmt 模式下调度器的行情导入同样经 xtdata_source 解析
+    # （scheduler.py 顶层 `from .xtdata_source import xtdata`，按
+    # QMT_BRIDGE_TRADER_BACKEND 环境变量选择通道）。
 
     parser = argparse.ArgumentParser(
         prog="qmt-scheduler",

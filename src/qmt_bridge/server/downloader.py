@@ -21,7 +21,7 @@ from datetime import datetime, timedelta
 from typing import Callable
 
 import pandas as pd
-from xtquant import xtdata
+from .xtdata_source import xtdata
 
 # 直接调用 client.supply_history_data2() 绕过 xtquant 的 download_history_data2 bug:
 # 当 result=True（数据已缓存）时，xtquant 的轮询循环永远挂起（回调不触发）。
@@ -282,6 +282,81 @@ def download_single_kline(
 # ── 批量下载 (替代 xtdata.download_history_data2) ────────────
 
 
+def _download_history_data2_bigqmt(
+    stock_list: list[str],
+    period: str,
+    start_time: str = "",
+    end_time: str = "",
+    callback: Callable[[dict], None] | None = None,
+) -> dict[str, str]:
+    """bigqmt 后端的批量 K 线下载：委托 compat 自带的 RPC 下载。
+
+    上游实现（xtquant_compat.download_history_data2）：一次 RPC 触发
+    QMT 端策略进程内的下载（需实例「运行中」且在交易时段；休市时该
+    RPC 提交超时被上游吞掉，流程降级为只读已有数据）→ 分批经
+    FormulaServer 读回轮询，直到数据出现或超时（每批至多
+    data_wait_seconds=60s）。
+
+    上游回调对每只代码都会报 finished（休市时数据并没有真的下回来），
+    所以这里在读回后追加一次数据落点探测（FormulaServer 读，毫秒级），
+    把「没下到」如实标成 ``nodata``，与 mini 路径的 ok/timeout 语义对齐。
+    """
+    statuses: dict[str, str] = {}
+    total = len(stock_list)
+
+    def _forward(prog: dict) -> None:
+        # 上游进度 → 本模块回调约定（status 此刻未知，先报 progress）
+        if callback is None:
+            return
+        callback(
+            {
+                "finished": prog.get("finished", 0),
+                "total": total,
+                "stock": prog.get("stockcode", ""),
+                "status": "progress",
+            }
+        )
+
+    try:
+        xtdata.download_history_data2(
+            list(stock_list),
+            period,
+            start_time=start_time,
+            end_time=end_time,
+            callback=_forward,
+        )
+    except Exception as exc:
+        logger.error("bigqmt K线下载异常 %s: %s", period, exc)
+        for code in stock_list:
+            statuses.setdefault(code, f"error: {exc}")
+
+    # 数据落点探测：ok / nodata
+    for batch in make_batches(list(stock_list), PROBE_BATCH_SIZE):
+        try:
+            data = xtdata.get_market_data_ex(
+                field_list=["close"],
+                stock_list=batch,
+                period=period,
+                start_time=start_time,
+                end_time=end_time,
+                count=1,
+            )
+        except Exception as exc:
+            logger.warning("bigqmt 下载落点探测失败: %s", exc)
+            continue
+        for code in batch:
+            df = (data or {}).get(code)
+            has_rows = df is not None and getattr(df, "shape", (0,))[0] > 0
+            if has_rows:
+                statuses[code] = "ok"
+            elif not str(statuses.get(code, "")).startswith("error"):
+                statuses[code] = "nodata"
+
+    for code in stock_list:
+        statuses.setdefault(code, "error: no result")
+    return statuses
+
+
 def download_history_data2_safe(
     stock_list: list[str],
     period: str = "1d",
@@ -301,6 +376,11 @@ def download_history_data2_safe(
     Returns:
         {stock_code: status_string}
     """
+    # bigqmt 兼容层没有 get_client（miniQMT C++ 客户端专有）——走 RPC 下载分支
+    if not hasattr(xtdata, "get_client"):
+        return _download_history_data2_bigqmt(
+            stock_list, period, start_time, end_time, callback
+        )
     client = xtdata.get_client()
     total = len(stock_list)
     results: dict[str, str] = {}
@@ -502,6 +582,31 @@ def download_kline_incremental(
     基于本地缓存探测，每只股票从各自的最新缓存日期开始增量下载。
     """
     t0 = time.time()
+    # bigqmt 兼容层没有 get_client —— 委托 compat 的批量 RPC 下载
+    #（上游按批 re-pull live，重复执行即保持最新，天然增量）。
+    # 休市/策略未运行时 RPC 提交被上游吞掉，落点探测会给每只如实报
+    # nodata/ok；调度器据此在下个周期重试。
+    if not hasattr(xtdata, "get_client"):
+        logger.info("K线 %s bigqmt 批量下载开始: %d 只", period, len(stocks))
+        statuses = _download_history_data2_bigqmt(stocks, period, "", "")
+        ok = sum(1 for s in statuses.values() if s == "ok")
+        fail = len(stocks) - ok
+        elapsed = time.time() - t0
+        logger.info(
+            "K线 %s bigqmt 下载完成: 成功 %d, 失败 %d, 耗时 %.1f秒",
+            period,
+            ok,
+            fail,
+            elapsed,
+        )
+        return IncrementalResult(
+            period=period,
+            ok=ok,
+            fail=fail,
+            timeout=0,
+            date_groups=1,
+            elapsed=elapsed,
+        )
     client = xtdata.get_client()
     effective_timeout = STOCK_TIMEOUT.get(period, 10)
     incrementally = True

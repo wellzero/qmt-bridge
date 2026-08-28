@@ -14,7 +14,7 @@
 """
 
 from fastapi import APIRouter, Query
-from xtquant import xtdata
+from ..xtdata_source import xtdata
 
 from ..helpers import _dataframe_dict_to_records, _numpy_to_python
 
@@ -30,6 +30,14 @@ MAJOR_INDICES = [
     "000905.SH",  # 中证500
     "000852.SH",  # 中证1000
 ]
+
+# K 线默认字段集（standard OHLCV + 成交额）。
+# 为什么不用 field_list=[]：xtdata 语义里空列表 = 全部字段，但 bigqmt 行情的
+# FormulaServer 快速直连（127.0.0.1:58600，见 docs/big-qmt.md §3.3）会拒绝
+# 空字段列表（formula_server.py: "field_list and stock_list are required"），
+# 请求被迫回落 Redis RPC —— 策略服务不运行时（休市）即整端点超时。
+# 显式给字段集即可走直连：不依赖 QMT 策略进程，休市也能读。
+DEFAULT_BAR_FIELDS = ["time", "open", "high", "low", "close", "volume", "amount"]
 
 
 @router.get("/full_tick")
@@ -83,6 +91,12 @@ def get_market_data_ex(
         "none", description="除权类型: none/front/back/front_ratio/back_ratio"
     ),
     fill_data: bool = Query(True, description="是否填充空数据"),
+    fields: str = Query(
+        "",
+        description="逗号分隔的字段列表；留空用默认 OHLCV 集 "
+        "(time,open,high,low,close,volume,amount)。bigqmt 后端下显式字段"
+        "才能走 FormulaServer 直连（空列表会被拒而回落 RPC）",
+    ),
 ):
     """获取扩展 K 线历史行情数据。
 
@@ -98,11 +112,14 @@ def get_market_data_ex(
     Returns:
         按股票代码分组的 K 线记录列表。
 
-    底层调用: xtdata.get_market_data_ex(field_list=[], stock_list=..., ...)
+    底层调用: xtdata.get_market_data_ex(field_list=显式字段集或 DEFAULT_BAR_FIELDS, stock_list=..., ...)
     """
     stock_list = [s.strip() for s in stocks.split(",")]
+    # 显式字段集：bigqmt 的 FormulaServer 直连拒绝空 field_list（否则回落
+    # Redis RPC，策略端休市不运行时整个端点超时）。见 DEFAULT_BAR_FIELDS。
+    field_list = [f.strip() for f in fields.split(",") if f.strip()]
     raw = xtdata.get_market_data_ex(
-        field_list=[],
+        field_list=field_list or list(DEFAULT_BAR_FIELDS),
         stock_list=stock_list,
         period=period,
         start_time=start_time,

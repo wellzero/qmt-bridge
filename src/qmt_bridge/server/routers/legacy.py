@@ -11,7 +11,7 @@
 """
 
 from fastapi import APIRouter, Query
-from xtquant import xtdata
+from ..xtdata_source import xtdata
 
 from ..downloader import download_single_kline
 from ..helpers import _market_data_to_records, _numpy_to_python
