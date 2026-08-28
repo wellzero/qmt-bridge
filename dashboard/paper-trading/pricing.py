@@ -132,20 +132,34 @@ def fetch_prices_from_server(
     if api_key:
         headers["X-API-Key"] = api_key
 
-    req = urllib.request.Request(url, headers=headers, method="GET")
     # 局域网请求禁用系统代理：进程若继承 http_proxy 且 no_proxy 通配符
     # （如 ``*.zicp.fun``）不被 urllib 识别，请求会被转发到代理并超时
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    try:
-        with opener.open(req, timeout=30) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        error_body = exc.read().decode("utf-8", errors="ignore")
-        logger.error("获取行情 HTTP 错误 %s: %s", exc.code, error_body)
-        raise RuntimeError(f"获取行情失败: HTTP {exc.code}") from exc
-    except Exception as exc:
-        logger.exception("获取行情失败")
-        raise RuntimeError(f"获取行情失败: {exc}") from exc
+
+    data = None
+    last_exc: Exception | None = None
+    for attempt in range(2):  # 拥塞时偶发超时，重试一次
+        req = urllib.request.Request(url, headers=headers, method="GET")
+        try:
+            with opener.open(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            break
+        except urllib.error.HTTPError as exc:
+            error_body = exc.read().decode("utf-8", errors="ignore")
+            logger.error("获取行情 HTTP 错误 %s: %s", exc.code, error_body)
+            raise RuntimeError(f"获取行情失败: HTTP {exc.code}") from exc
+        except Exception as exc:
+            last_exc = exc
+            if attempt == 0:
+                logger.warning("获取行情超时，5 秒后重试: %s", exc)
+
+    if data is None:
+        logger.error("获取行情失败（已重试）: %s", last_exc)
+        raise RuntimeError(
+            "获取行情失败: "
+            f"{last_exc}（qmt-server 无响应；每个交易日 11:19-12:34 "
+            "策略集中迭代期间服务易拥塞，可稍后重试）"
+        ) from last_exc
 
     ticks = data.get("data", {}) if isinstance(data, dict) else {}
     prices: dict[str, float] = {}
