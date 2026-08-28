@@ -46,6 +46,27 @@ function Write-Ok([string]$msg)    { Write-Host "    [OK] $msg" -ForegroundColor
 function Write-Warn2([string]$msg) { Write-Host "    [!!] $msg" -ForegroundColor Yellow }
 function Fail([string]$msg)        { Write-Host "    [XX] $msg" -ForegroundColor Red; exit 1 }
 
+# qmt_bridge 当前解析到哪个仓库（editable 可能指向旧/其它 checkout，见 §3.1 陷阱）
+# 返回 "OK <模块路径>" / "MISMATCH <模块路径>" / "NOT_INSTALLED"
+# 用 python 的 realpath 归一 junction/UNC，避免 C:\junction 与 \\host\... 比较误报
+function Get-QmtBridgeResolution([string]$repo) {
+    $esc = $repo.Replace("'", "\'")
+    $code = @"
+import os
+try:
+    import qmt_bridge
+except ImportError:
+    print("NOT_INSTALLED"); raise SystemExit
+mod = os.path.normcase(os.path.realpath(qmt_bridge.__file__))
+repo = os.path.normcase(os.path.realpath(r'$esc'))
+print(("OK" if mod.startswith(repo + os.sep) else "MISMATCH") + " " + mod)
+"@
+    # PS5.1 向原生命令传多行参数会损坏代码，写临时 .py 执行
+    $tmp = Join-Path $env:TEMP "bigqmt_editable_check.py"
+    $code | Out-File -FilePath $tmp -Encoding ascii
+    (& py $tmp 2>$null) -join "`n"
+}
+
 if (-not $RepoDir) { $RepoDir = Split-Path -Parent $PSScriptRoot }
 
 # ---------------------------------------------------------------- 0. 预检
@@ -53,11 +74,18 @@ Write-Step "步骤 0/6 预检"
 if (-not (Test-Path (Join-Path $QmtPythonDir "..\bin.x64\pythonw.exe"))) {
     Fail "未找到 $QmtPythonDir 同级的 bin.x64\pythonw.exe —— 请确认 -QmtPythonDir 指向完整版 QMT 的 python 目录"
 }
-Write-Ok "QMT 客户端: $(Split-Path -Parent (Split-Path -Parent $QmtPythonDir))  (内置 Py3.6)"
+Write-Ok "QMT 客户端: $(Split-Path -Parent $QmtPythonDir)  (内置 Py3.6)"
 if ($RepoDir -like "\\*") {
     Write-Warn2 "仓库在 UNC 路径 ($RepoDir)，pip -e 可能失败；建议 -RepoDir 传本地路径（如 junction）"
 }
 Write-Ok "仓库: $RepoDir"
+
+# editable 解析检查（防止旧 editable 指向其它 checkout 遮蔽本仓库）
+$res = Get-QmtBridgeResolution $RepoDir
+if ($res -like "MISMATCH*") {
+    Write-Warn2 ("qmt_bridge 当前解析到别的仓库: " + ($res -replace '^(\w+) ', ''))
+    Write-Warn2 "qmt-server 会用到旧代码（如 main 分支 2.9.11，无 server/trading/）—— 本脚本步骤 1 会把 editable 重指到本仓库"
+}
 
 # ---------------------------------------------------------------- 1. qmt-server 侧依赖
 if ($SkipServerInstall) {
@@ -69,6 +97,15 @@ if ($SkipServerInstall) {
         py -m pip install --user -e ".[bigqmt]" -i $PipIndex | Out-Null
         Write-Ok "已安装/校验 qmt-bridge[bigqmt]"
     } finally { Pop-Location }
+    # 验证 editable 确已指向本仓库（junction/UNC 归一后比较）
+    $res = Get-QmtBridgeResolution $RepoDir
+    if ($res -like "OK*") {
+        Write-Ok ("qmt_bridge 解析: " + ($res -replace '^\w+ ', ''))
+    } elseif ($res -eq "NOT_INSTALLED") {
+        Fail "pip install 后仍 import 不到 qmt_bridge —— 检查 py 版本/--user 目录"
+    } else {
+        Fail ("editable 仍指向别处: " + ($res -replace '^(\w+) ', '') + " —— 旧 editable 未被替换，请先 pip uninstall qmt-bridge 再重跑")
+    }
 }
 
 # ---------------------------------------------------------------- 2. Redis 服务端
