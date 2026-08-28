@@ -27,8 +27,8 @@ REST/WS 调用  ──────────►  qmt-bridge (qmt-server)
 
 - 交易 RPC：资产/持仓/委托/成交查询走 Redis list queue；
   `submit_order`/`cancel_order` 被 `rpc_allow_order_methods=False` **门控拒绝**。
-- 行情 shim：`--trader-backend bigqmt` 时 `xtquant.xtdata` 代理到同一 RPC
-  （需 `QMT_BRIDGE_BIGQMT_SHIM_DIR`，见 §5.1）。
+- 行情：`--trader-backend bigqmt` 时由 `server/xtdata_source.py` 直接解析
+  xtquant-big-convert（FormulaServer 直连优先，其余走同一 RPC）。
 
 ---
 
@@ -65,12 +65,13 @@ REST/WS 调用  ──────────►  qmt-bridge (qmt-server)
 ```powershell
 # 在仓库根（或 Desktop\Shared\qmt-bridge-big-qmt 本地junction）
 py -m pip install --user -e ".[bigqmt]" -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
-# bigqmt extra = xtquant-big-convert[redis]>=0.2.9（自带客户端 + xtquant import shim）
+# bigqmt extra = xtquant-big-convert[redis]>=0.2.9（客户端 RPC + 行情兼容层）
 ```
 
-> 注意：该 wheel 会向用户 site-packages 顶层放一个 `xtquant\` import shim，
-> 可能遮蔽真实 xtquant。测试套件已封闭化（commit `9fdcc50`），不受影响；
-> qmt-server 启动时用 `QMT_BRIDGE_BIGQMT_SHIM_DIR` 显式指定专用 shim 目录（§5.1）。
+> 注意：该 wheel 会向用户 site-packages 顶层放一个 `xtquant\` 目录（上游为
+> 旧代码无缝替换而设）。qmt-bridge **不使用它**：bigqmt 行情由
+> `server/xtdata_source.py` 显式解析 `bigqmt_signal_trader.xtquant_compat`，
+> mini 后端用真实 xtquant —— 两条路径都不依赖裸 `import xtquant` 的解析顺序。
 
 ### 3.2 Redis 服务端（部署机，一次性）
 
@@ -106,18 +107,21 @@ C:\Users\Docker\bigqmt\redis\redis-cli.exe ping   # → PONG
 py scripts\deploy_bigqmt_server.py `
   --qmt-python-dir "C:\QMT_Simulator\python" `
   --account-id 88002471 `
-  --redis-host 127.0.0.1 --redis-port 6379 --redis-db 5 `
-  --shim-out "C:\Users\Docker\bigqmt\shim"
+  --redis-host 127.0.0.1 --redis-port 6379 --redis-db 5
 ```
 
 脚本行为（先 `--dry-run` 可预览）：
 
+- 源优先取 `import bigqmt_signal_trader` 的实际落点（editable 安装 →
+  源码 `src/` 本体；wheel 常规安装退回元数据定位），输出带版本号留痕；
+- 覆盖前把已存在的受管文件（包 + 6 入口，不含 local_config）自动备份到
+  `%USERPROFILE%\bigqmt\backup\bigqmt_server_pre_<时间戳>.zip`；
 - 复制 `bigqmt_signal_trader\` 包 + 6 个顶层入口（`BIGQMT_REDIS_DRYRUN.py`、
   `bigqmt_signal_trader_strategy.py`、`bigqmt_signal_trader_redis_rpc_runtime.py` 等）
-  到 QMT `python\` 目录；
+  到 QMT `python\` 目录；拷完清理 `__pycache__`、对上游已删的残留文件打
+  `[遗留]` 告警；
 - 生成 `bigqmt_signal_trader_local_config.py`（**已存在则绝不覆盖**）：
-  账户 ID + Redis 配置 + `rpc_allow_order_methods: False`（下单门控，默认关）；
-- 导出 xtquant import shim 到 `--shim-out`（供 qmt-server 用，不进 QMT 目录）。
+  账户 ID + Redis 配置 + `rpc_allow_order_methods: False`（下单门控，默认关）。
 
 ### 3.4 QMT 内置 Python 依赖（redis-py 3.5.3）
 
@@ -216,10 +220,9 @@ C:\Users\Docker\bigqmt\redis\redis-cli.exe -n 5 keys "bigqmt:*"
 ### 5.1 启动 bigqmt 后端的 qmt-server
 
 ```powershell
-$env:QMT_BRIDGE_BIGQMT_SHIM_DIR = "C:\Users\Docker\bigqmt\shim"   # xtdata shim 专用目录
 $env:BIGQMT_ACCOUNT_ID    = "88002471"
 $env:BIGQMT_REDIS_HOST    = "127.0.0.1"; $env:BIGQMT_REDIS_PORT = "6379"; $env:BIGQMT_REDIS_DB = "5"
-qmt-server --trader-backend bigqmt            # 或： just serve-bigqmt
+qmt-server --trader-backend bigqmt            # 或： just serve-backend bigqmt
 ```
 
 - 端口/参数与原 `qmt-server` 完全一致（默认 18888）；策略侧 REST/WS API
@@ -270,7 +273,7 @@ bigqmt 后端当前支持：委托（下单门控）、查询、信用、账户 
 | `connect()` 超时/ping 无响应 | Redis 未起 / 策略实例没运行 | `redis-cli ping`；看 §4.1 日志行是否存在 |
 | 日志无 `[bigqmt_rpc]` 行 | 勾了「启动本地 python」或实例未绑账户 | 按 §3.6 重挂实例 |
 | RPC 通但查询报错 | 账户 ID 不一致 | QMT 侧 `local_config` 的 `BIGQMT_ACCOUNT_ID` 与客户端 env `BIGQMT_ACCOUNT_ID` 必须同为 `88002471` |
-| 行情回落真实 xtquant | 未设 `QMT_BRIDGE_BIGQMT_SHIM_DIR` | §5.1 设置后重启 qmt-server（必须在任何 xtquant 导入前） |
+| serve 预检报「QMT 侧部署与客户端包不一致」 | QMT 侧文件拷贝未随 pip 升级走（漂移） | 重跑 §3.3 同步（自动备份旧文件） |
 | QMT 内置 Python 报 `No module named redis` | §3.4 未做/目录错 | 确认 `C:\QMT_Simulator\python\redis\__init__.py` 存在 |
 | `Sensitive Data Detected`（QMT 日志） | 旧版 JSON 带股票代码触发沙箱过滤 | v0.2.9 已做安全编码；若出现请升级 wheel |
 | 策略列表里看不到新文件 | 列表来自内部索引，非目录扫描 | 只能经编辑器保存注册（§3.5） |

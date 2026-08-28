@@ -9,7 +9,7 @@
 - bigqmt 后端未支持方法 → UnsupportedOperation → 路由 503
 - BigQmtAdapter 逐方法映射（fake compat 单例）
 - XtTraderManager 门面转发与后端工厂
-- xtquant import shim 目录检测与 sys.path 安装
+- xtdata 来源选择器（按后端解析行情模块，docs/big-qmt.md §3.3）
 """
 
 from __future__ import annotations
@@ -535,75 +535,194 @@ def test_unsupported_operation_handler_shape(bigqmt_app):
     assert resp.json()["method"] == "query_ipo_data"
 
 
+def test_rpc_timeout_returns_504(bigqmt_app, monkeypatch):
+    """RPC-only 端点在 QMT 端策略未运行时超时 → 504 + hint（不再裸 500）。"""
+    from qmt_bridge.server.routers import meta
+
+    class _RpcOnlyXtdata:
+        def get_market_last_trade_date(self, market):
+            raise TimeoutError(
+                "redis rpc timeout: get_market_last_trade_date "
+                "request_queue=bigqmt:rpc:queue:88002471"
+            )
+
+    monkeypatch.setattr(meta, "xtdata", _RpcOnlyXtdata())
+    client = TestClient(bigqmt_app)
+    resp = client.get("/api/meta/last_trade_date", params={"market": "SH"})
+    assert resp.status_code == 504
+    body = resp.json()
+    assert "redis rpc timeout" in body["detail"]
+    assert "FormulaServer" in body["hint"]
+
+
+def test_connection_status_bigqmt_probe(bigqmt_app, monkeypatch):
+    """bigqmt 兼容层无 get_client → FormulaServer 探测，不再误报断连。"""
+    from qmt_bridge.server.routers import meta
+
+    class _BigqmtCompatXtdata:
+        # 兼容层单例：只有 FormulaServer 白名单读，没有 get_client
+        def get_instrument_detail(self, code):
+            assert code == "000001.SH"
+            return {"InstrumentName": "平安银行"}
+
+    monkeypatch.setattr(meta, "xtdata", _BigqmtCompatXtdata())
+    client = TestClient(bigqmt_app)
+    resp = client.get("/api/meta/connection_status")
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "connected": True,
+        "backend": "bigqmt",
+        "channel": "FormulaServer",
+    }
+
+
+def test_connection_status_mini_uses_get_client(bigqmt_app, monkeypatch):
+    """mini 通道保持原语义：get_client().get_connect_status()。"""
+    from qmt_bridge.server.routers import meta
+
+    class _MiniXtdata:
+        def get_client(self):
+            return SimpleNamespace(get_connect_status=lambda: True)
+
+    monkeypatch.setattr(meta, "xtdata", _MiniXtdata())
+    client = TestClient(bigqmt_app)
+    resp = client.get("/api/meta/connection_status")
+    assert resp.status_code == 200
+    assert resp.json() == {"connected": True}
+
+
 # ------------------------------------------------------------------
-# xtquant import shim 检测与安装（docs/big-qmt.md §3.3）
+# xtdata 来源选择器（docs/big-qmt.md §3.3）
 # ------------------------------------------------------------------
 
 
-def _write_shim_dir(root: Path, real: bool = False) -> Path:
-    xtquant = root / "xtquant"
-    xtquant.mkdir(parents=True)
-    (xtquant / "__init__.py").write_text("", encoding="utf-8")
-    if real:
-        (xtquant / "xttrader.py").write_text(
-            "class XtQuantTraderClient: ...\n", encoding="utf-8"
-        )
-    else:
-        (xtquant / "xttrader.py").write_text(
-            "from bigqmt_signal_trader.xtquant_compat import XtQuantTrader\n",
-            encoding="utf-8",
-        )
-    (xtquant / "xtdata.py").write_text(
-        "import bigqmt_signal_trader.xtquant_compat as _compat\n",
-        encoding="utf-8",
-    )
-    return xtquant
+@pytest.fixture()
+def xtdata_source_env(monkeypatch):
+    """按需切换 xtdata_source 的后端；测试结束后清缓存防污染后续用例。
 
-
-def test_shim_detection_distinguishes_real_xtquant(tmp_path):
-    """特征检测：shim 的 xttrader.py 重导出 compat；真实 xtquant 不是。"""
-    from qmt_bridge.server.bigqmt_shim import _looks_like_shim
-
-    shim_dir = _write_shim_dir(tmp_path / "shim", real=False)
-    assert _looks_like_shim(shim_dir) is True
-
-    real_dir = _write_shim_dir(tmp_path / "real", real=True)
-    assert _looks_like_shim(real_dir) is False
-    assert _looks_like_shim(tmp_path / "nonexistent") is False
-
-
-def test_install_shim_inserts_parent_at_sys_path_front(tmp_path, monkeypatch):
-    """显式 shim 目录：父目录插到 sys.path[0]（必须先于真实 xtquant）。"""
-    from qmt_bridge.server import bigqmt_shim
-
-    _write_shim_dir(tmp_path, real=False)
-    inserted = bigqmt_shim.install_bigqmt_xtdata_shim(str(tmp_path))
-    assert inserted == tmp_path
-    assert sys.path[0] == str(tmp_path)
-    # 幂等
-    assert bigqmt_shim.install_bigqmt_xtdata_shim(str(tmp_path)) == tmp_path
-    assert sys.path.count(str(tmp_path)) == 1
-
-
-def test_install_shim_rejects_real_xtquant_dir(tmp_path, monkeypatch):
-    """非 shim 目录（真实 xtquant）不安装，返回 None。
-
-    屏蔽 site-packages 回退（sys.modules 置 None 即 ImportError），
-    否则本机真实安装 xtquant-big-convert 后回退会命中其顶层 shim，
-    测试随环境翻转。
+    解析缓存与 settings 都是模块级全局，不清场会把 bigqmt 单例带给
+    后面的用例（paper_trading 的 mock 断言依赖真实 xtquant 模块）。
     """
-    from qmt_bridge.server import bigqmt_shim
+    from qmt_bridge.server import xtdata_source
+    from qmt_bridge.server import config
 
-    monkeypatch.delenv("QMT_BRIDGE_BIGQMT_SHIM_DIR", raising=False)
-    monkeypatch.setitem(sys.modules, "bigqmt_signal_trader", None)
-    _write_shim_dir(tmp_path, real=True)
-    assert bigqmt_shim.install_bigqmt_xtdata_shim(str(tmp_path)) is None
+    def set_backend(backend: str):
+        monkeypatch.setenv("QMT_BRIDGE_TRADER_BACKEND", backend)
+        config.reset_settings(None)
+        xtdata_source.reset_xtdata_cache()
+
+    yield set_backend
+
+    config.reset_settings(None)
+    xtdata_source.reset_xtdata_cache()
 
 
-def test_install_shim_reads_env_var(tmp_path, monkeypatch):
-    """QMT_BRIDGE_BIGQMT_SHIM_DIR 环境变量生效。"""
-    from qmt_bridge.server import bigqmt_shim
+def test_xtdata_source_mini_resolves_real_xtquant(xtdata_source_env):
+    """mini 后端（默认）：xtdata 解析到真实 xtquant 模块。"""
+    xtdata_source_env("mini")
+    from qmt_bridge.server import xtdata_source
 
-    _write_shim_dir(tmp_path, real=False)
-    monkeypatch.setenv("QMT_BRIDGE_BIGQMT_SHIM_DIR", str(tmp_path))
-    assert bigqmt_shim.install_bigqmt_xtdata_shim() == tmp_path
+    mod = xtdata_source.get_xtdata()
+    assert type(mod).__name__ == "module"  # 真实 xtquant.xtdata 是模块
+
+
+def test_xtdata_source_bigqmt_resolves_compat_singleton(xtdata_source_env):
+    """bigqmt 后端：xtdata 解析到 xtquant_big_convert 的兼容单例。"""
+    xtdata_source_env("bigqmt")
+    from qmt_bridge.server import xtdata_source
+
+    mod = xtdata_source.get_xtdata()
+    assert type(mod).__name__ == "BigQmtXtData"
+
+
+def test_xtdata_source_caches_until_reset(xtdata_source_env, monkeypatch):
+    """解析结果缓存：重复 get_xtdata 同对象；reset 后按新配置重解析。"""
+    xtdata_source_env("mini")
+    from qmt_bridge.server import xtdata_source
+
+    first = xtdata_source.get_xtdata()
+    assert xtdata_source.get_xtdata() is first
+    xtdata_source.reset_xtdata_cache()
+    monkeypatch.setattr(xtdata_source, "_current_backend", lambda: "bigqmt")
+    second = xtdata_source.get_xtdata()
+    assert second is not first
+    assert type(second).__name__ == "BigQmtXtData"
+
+
+# ------------------------------------------------------------------
+# 下载：bigqmt 分支（downloader 无 get_client → 委托 compat RPC 下载）
+# ------------------------------------------------------------------
+
+
+class _FakeBigqmtDownloadXtdata:
+    """compat 单例形状：无 get_client；download_history_data2 / 读回可注入。"""
+
+    def __init__(self, have_rows: set[str], error: Exception | None = None):
+        import pandas as pd
+
+        self._df = pd.DataFrame({"close": [1.0]})
+        self._empty = pd.DataFrame({"close": []})
+        self.have_rows = have_rows
+        self.error = error
+        self.download_calls: list[dict] = []
+
+    def download_history_data2(self, stock_list, period, **kw):
+        self.download_calls.append({"stocks": list(stock_list), "period": period, **kw})
+        if self.error is not None:
+            raise self.error
+        for i, code in enumerate(stock_list, 1):
+            kw.get("callback") and kw["callback"](
+                {"finished": i, "total": len(stock_list), "stockcode": code}
+            )
+        return {"finished": len(stock_list), "total": len(stock_list)}
+
+    def get_market_data_ex(self, field_list=None, stock_list=None, **kw):
+        return {
+            c: (self._df if c in self.have_rows else self._empty)
+            for c in (stock_list or [])
+        }
+
+
+def test_download_history_data2_safe_bigqmt_branch(monkeypatch):
+    """bigqmt：safe 下载委托 compat RPC 批量下载，落点探测区分 ok/nodata。"""
+    from qmt_bridge.server import downloader
+
+    fake = _FakeBigqmtDownloadXtdata(have_rows={"000858.SZ"})
+    monkeypatch.setattr(downloader, "xtdata", fake)
+
+    progress: list[dict] = []
+    results = downloader.download_history_data2_safe(
+        ["000858.SZ", "000002.SZ"], period="1d", callback=progress.append
+    )
+
+    assert len(fake.download_calls) == 1
+    assert fake.download_calls[0]["stocks"] == ["000858.SZ", "000002.SZ"]
+    assert results == {"000858.SZ": "ok", "000002.SZ": "nodata"}
+    # 上游进度回调被转发为本模块约定（status=progress）
+    assert [p["status"] for p in progress] == ["progress", "progress"]
+
+
+def test_download_history_data2_safe_bigqmt_error(monkeypatch):
+    """bigqmt：compat 下载抛异常 → 每只 error: ...，不冒泡。"""
+    from qmt_bridge.server import downloader
+
+    fake = _FakeBigqmtDownloadXtdata(
+        have_rows=set(), error=RuntimeError("redis rpc timeout")
+    )
+    monkeypatch.setattr(downloader, "xtdata", fake)
+
+    results = downloader.download_history_data2_safe(["600519.SH"], period="1d")
+    assert results["600519.SH"].startswith("error: redis rpc timeout")
+
+
+def test_download_kline_incremental_bigqmt_branch(monkeypatch):
+    """bigqmt：调度器增量入口走同一委托，统计映射到 IncrementalResult。"""
+    from qmt_bridge.server import downloader
+
+    fake = _FakeBigqmtDownloadXtdata(have_rows={"600519.SH"})
+    monkeypatch.setattr(downloader, "xtdata", fake)
+
+    res = downloader.download_kline_incremental(["600519.SH", "000002.SZ"], "1d")
+    assert res.ok == 1
+    assert res.fail == 1
+    assert res.date_groups == 1

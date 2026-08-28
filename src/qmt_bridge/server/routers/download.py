@@ -20,7 +20,7 @@
 """
 
 from fastapi import APIRouter
-from xtquant import xtdata
+from ..xtdata_source import xtdata
 
 from ..downloader import download_history_data2_safe
 from ..helpers import _numpy_to_python

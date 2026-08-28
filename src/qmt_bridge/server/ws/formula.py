@@ -67,7 +67,8 @@ async def ws_formula(ws: WebSocket):
     loop = asyncio.get_running_loop()
 
     try:
-        from xtquant import xtdata
+        from ..xtdata_source import get_xtdata
+        xtdata = get_xtdata()
 
         while True:
             raw = await ws.receive_text()
@@ -137,7 +138,8 @@ async def ws_formula(ws: WebSocket):
         logger.exception("formula WS error")
     finally:
         # 清理：取消所有未取消的公式订阅
-        from xtquant import xtdata as _xtd
+        from ..xtdata_source import get_xtdata as _get_xtdata
+        _xtd = _get_xtdata()
 
         for seq_id in subscriptions:
             try:

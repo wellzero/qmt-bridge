@@ -4,6 +4,28 @@
 ``xtquant_big_convert`` 客户端的 Redis/ZMQ RPC 调用，由完整版 QMT 内置
 Python 沙箱中的服务端（``passorder`` / ``get_trade_detail_data``）执行。
 
+与完整版 QMT 的通信全景（读走通道A直连，写走通道B排队；行前缀对齐仅在
+等宽字体下成立）::
+
+    qmt-server 进程                       完整版 QMT 客户端（XtItClient.exe）
+    ──────────────                       ────────────────────────────────
+    BigQmtAdapter                         ① C++ 行情服务 FormulaServer（TCP 58600）
+      └ BigQmtRpcClient ──通道A(读)──►      白名单 10 方法毫秒级代答，不经沙箱、
+        （与行情通道同一客户端）             无需策略实例运行，休市可用
+                                          ② 策略沙箱（内置 Python 3.6）
+    BigQmtRpcClient ──通道B(写)──┐          bigqmt_rpc_bootstrap 模型交易实例
+      LPUSH 请求                  │          （须"运行中"——休市时 QMT 引擎不驱动）
+      bigqmt:rpc:queue:<账号> ◄───┘          init 启动 RPC 服务端；adjust 每 500ms
+        （Redis db5，RESP2）                  排空队列 → passorder / cancel /
+                                               get_trade_detail_data 执行
+                                            回写 bigqmt:rpc:resp:<账号>:<req_id>
+    （阻塞等该键，默认 6s 超时）◄──────────    （TTL 60s）
+
+    通道A/B 共用一个 BigQmtRpcClient：每次 call 先试 FormulaServer 能否代答
+    （method 白名单 + 参数可翻译，如 get_market_data_ex 需显式字段集），
+    不行才落通道B。账号两端必须一致，否则请求进 A 队列、服务端听 B 队列
+    （表现为 ping 超时）；下单另受 QMT 侧 rpc_allow_order_methods 门控。
+
 关键约定（``docs/big-qmt.md`` §3.2/§4）：
 
 - **映射方向**：对外以 qmt-bridge REST API 为准，策略零改动；
@@ -51,7 +73,7 @@ class BigQmtAdapter:
     """基于 ``bigqmt_signal_trader.xtquant_compat`` 的交易后端。
 
     使用 compat 模块级单例（``configure()`` 原地更新 ``xt_trader`` / ``xtdata``），
-    使交易适配层与 xtdata import shim 共享同一个 RPC 客户端。
+    使交易适配层与行情通道（xtdata_source）共享同一个 RPC 客户端。
 
     Attributes:
         account_id: 已配置的 live 账户 ID（单实例单账户）。
@@ -96,7 +118,7 @@ class BigQmtAdapter:
         compat = self._load_compat()
 
         # compat.configure() 原地更新 xt_trader / xtdata 单例，
-        # 与 xtdata import shim 共享同一 RPC 客户端。
+        # 与行情通道（xtdata_source）共享同一 RPC 客户端。
         # account_id kwarg 已对照上游 v0.2.9 wheel 验证：
         # configure(account_id=None, redis_client=None, redis_config=None,
         #           timeout_seconds=None)，配置经 bigqmt_signal_trader_local_config

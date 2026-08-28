@@ -23,14 +23,16 @@ rpc_allow_order_methods=False，submit_order/cancel_order 会被服务端
 
 【本脚本做什么】deploy-user-guide.md §3.1–3.4 的自动化：
   步骤 1  qmt-server 侧依赖：pip install -e ".[bigqmt]"（TUNA 镜像）
-          → 安装 xtquant-big-convert[redis]（客户端 + 顶层 xtquant shim）
+          → 安装 xtquant-big-convert[redis]（客户端 RPC + 行情兼容层）
           → 验证 editable 确实指向本仓库（防旧 checkout 遮蔽）
   步骤 2  Redis 服务端：tporadowski/Redis 5.0.14.1 绿色版
           （api.github.com 资产通道下载）→ 解压 → detached 启动 → PONG
   步骤 3  QMT 侧文件：调用本仓库 scripts/deploy_bigqmt_server.py
-          → 45 个文件（bigqmt_signal_trader 包 + 6 个顶层入口）拷入
-            QMT python 目录；生成 local_config（已存在绝不覆盖）；
-            导出 xtquant import shim 到 -ShimOutDir（qmt-server 行情用）
+          → bigqmt_signal_trader 包 + 6 个顶层入口（数量随上游版本，
+            0.2.14 = 46 个文件）拷入 QMT python 目录；源取 import
+            bigqmt_signal_trader 实际解析处（editable 安装常态）；
+            覆盖前自动备份旧文件到 %USERPROFILE%\bigqmt\backup；
+            生成 local_config（已存在绝不覆盖）
   步骤 4  redis-py 3.5.3 → 拷进 QMT 内置 Python 3.6 目录（纯 Python 依赖）
   步骤 5  用 QMT 自带 pythonw.exe 做导入自检（redis + bigqmt_signal_trader）
   步骤 6  打印剩余手工步骤清单（QMT 客户端内的 UI 操作，无法脚本化，
@@ -61,6 +63,8 @@ rpc_allow_order_methods=False，submit_order/cancel_order 会被服务端
   - Redis 已监听 → 跳过下载/启动；redis-server.exe 已存在 → 跳过下载
   - QMT python 目录已有 redis-py → 跳过复制
   - local_config 已存在 → 由部署脚本保留（含账号/Redis 凭据，绝不覆盖）
+  - 覆盖前自动备份旧的受管文件（包 + 6 入口，不含 local_config）到
+    %USERPROFILE%\bigqmt\backup\bigqmt_server_pre_<时间戳>.zip
 
 【退出行为】任何步骤失败：红色 [XX] 提示后 exit 1；全部通过 exit 0。
 
@@ -102,14 +106,6 @@ param(
     # Redis 服务端安装目录：不存在 redis-server.exe 时自动下载解压到这里。
     # RDB/AOF 持久化文件也落此目录（启动参数 --dir 显式指定）。
     [string]$RedisDir = "$env:USERPROFILE\bigqmt\redis",
-
-    # xtquant import shim 导出目录：qmt-server 行情通道专用。
-    # 用途：qmt-bridge 的 routers/ws 等 23 处顶层 `from xtquant import xtdata`
-    # 在 bigqmt 模式下要改走 RPC，本目录的 shim 做代理。启动 qmt-server 前：
-    #   $env:QMT_BRIDGE_BIGQMT_SHIM_DIR = <此目录>
-    # 不导出到 site-packages：wheel 顶层 xtquant 会遮蔽真实 xtquant，
-    # 专用目录 + 环境变量是设计文档 §3.3 推荐的隔离方式。
-    [string]$ShimOutDir = "$env:USERPROFILE\bigqmt\shim",
 
     # pip 镜像。默认 TUNA：本机 PyPI CDN（files.pythonhosted.org）被墙。
     # 换环境如可直连 PyPI，传 -PipIndex https://pypi.org/simple。
@@ -175,7 +171,9 @@ repo = os.path.normcase(os.path.realpath(r'$esc'))
 print(("OK" if mod.startswith(repo + os.sep) else "MISMATCH") + " " + mod)
 "@
     $tmp = Join-Path $env:TEMP "bigqmt_editable_check.py"
-    $code | Out-File -FilePath $tmp -Encoding ascii
+    # UTF-8（PS5.1 带 BOM，Python3 接受）而非 ascii：仓库路径可能含中文，
+    # ascii 会把非 ASCII 字符打成 ?，路径错 → 误报 MISMATCH。
+    $code | Out-File -FilePath $tmp -Encoding utf8
     (& py $tmp 2>$null) -join "`n"
 }
 
@@ -199,8 +197,8 @@ if ($RepoDir -like "\\*") {
     Write-Warn2 "仓库在 UNC 路径 ($RepoDir)，pip -e 可能失败；建议 -RepoDir 传本地路径（如 junction）"
 }
 Write-Ok "仓库: $RepoDir"
-# 把关键目录在开头亮出来：shim 目录是 qmt-server 侧唯一需要人工抄的路径。
-Write-Ok "shim 导出目录: $ShimOutDir   (Redis 目录: $RedisDir)"
+# 把关键目录在开头亮出来。
+Write-Ok "Redis 目录: $RedisDir"
 
 # editable 遮蔽检查（详见 Get-QmtBridgeResolution 注释）。
 # 这里只告警不终止：步骤 1 的 pip install 本来就会重指 editable；
@@ -216,9 +214,9 @@ if ($res -like "MISMATCH*") {
 # =================================================================
 # 说明：
 #   pyproject.toml 的 bigqmt extra = xtquant-big-convert[redis]>=0.2.9。
-#   它提供 a) RPC 客户端（bigqmt_signal_trader.xtquant_compat，BigQmtAdapter
-#   直接 import 它）；b) wheel 顶层 xtquant import shim（行情代理）——
-#   正因 b 会遮蔽真实 xtquant，才需要 -ShimOutDir 的专用导出（步骤 3）。
+#   它提供 RPC 客户端 + 行情兼容层（bigqmt_signal_trader.xtquant_compat）：
+#   BigQmtAdapter（交易）与 server/xtdata_source.py（行情）都直接 import 它，
+#   不经任何 sys.path 间接层 —— editable 安装即直连源码 src/ 本体。
 #   -e（editable）+ 本仓库：import qmt_bridge 跟随当前 checkout，
 #   分支切换即刻生效，无需反复 pip install。
 #   --user：装进用户站点包，无需管理员权限（本机无提权环境）。
@@ -320,36 +318,32 @@ if (Test-Path $redisCli) {
 # 步骤 3/6 QMT 侧文件部署 —— 真正「把服务端放进 QMT」的一步
 # =================================================================
 # 实际干活的是本仓库 scripts/deploy_bigqmt_server.py（本脚本只是编排者），
-# 它做三件事，全部幂等：
-#   1. 从已安装 wheel 提取 45 个文件 → QMT python 目录：
-#      bigqmt_signal_trader\ 包（RPC 服务端本体，纯 stdlib + 惰性 import）
-#      + 6 个顶层入口（BIGQMT_REDIS_DRYRUN.py、bigqmt_signal_trader_
-#      redis_rpc_runtime.py 运行时等）。
-#   2. 生成 bigqmt_signal_trader_local_config.py（账号 + Redis + 下单门控
+# 它做四件事，全部幂等：
+#   1. 解析源目录：优先 import bigqmt_signal_trader 的实际落点 —— editable
+#      安装（本机常态）下 pip 元数据的 dist.files 只有 finder 记录，
+#      旧版“从 wheel 提取”会直接报“找不到 bigqmt_signal_trader 包”；
+#      wheel 常规安装退回元数据定位，再不行 --source-dir 显式指定。
+#      输出里带版本号（xtquant-big-convert 0.2.14 …），部署留痕可查。
+#   2. 覆盖前把已存在的受管文件（包 + 6 入口，不含 local_config ——
+#      凭据不进备份 zip）打包到 %USERPROFILE%\bigqmt\backup。
+#   3. 拷入 bigqmt_signal_trader\ 包（RPC 服务端本体，纯 stdlib + 惰性
+#      import）+ 6 个顶层入口（BIGQMT_REDIS_DRYRUN.py、bigqmt_signal_
+#      trader_redis_rpc_runtime.py 运行时等）；拷完清掉目标包内的
+#      __pycache__，并对上游已删除而目标残留的文件打 [遗留] 告警。
+#   4. 生成 bigqmt_signal_trader_local_config.py（账号 + Redis + 下单门控
 #      rpc_allow_order_methods=False）。含敏感信息 —— 已存在则【绝不覆盖】，
 #      这是设计约束（§3.5），改账号/Redis 请手工编辑该文件。
-#   3. 把 wheel 的 xtquant import shim 导出到 -ShimOutDir（见参数说明）。
 # 注意：QMT 自带的示例策略文件（网格策略.py 等）完全不会被触碰。
 Write-Step "步骤 3/6 QMT 侧文件（deploy_bigqmt_server.py）"
 $depArgs = @(
     (Join-Path $PSScriptRoot "deploy_bigqmt_server.py"),
     "--qmt-python-dir", $QmtPythonDir,
     "--account-id", $AccountId,
-    "--redis-host", $RedisHost, "--redis-port", "$RedisPort", "--redis-db", "$RedisDb",
-    "--shim-out", $ShimOutDir
+    "--redis-host", $RedisHost, "--redis-port", "$RedisPort", "--redis-db", "$RedisDb"
 )
 & py @depArgs
 if ($LASTEXITCODE -ne 0) { Fail "部署脚本退出码 $LASTEXITCODE" }
-Write-Ok "QMT 侧文件 + local_config（已存在则保留）+ shim 导出完成"
-# shim 落盘验证：xtdata.py 是 shim 的核心文件。验证 + 把 qmt-server 侧
-# 唯一需要人工抄的用法行直接打印出来（复制即用）。
-$shimFile = Join-Path $ShimOutDir "xtquant\xtdata.py"
-if (Test-Path $shimFile) {
-    Write-Ok "shim 位置: $shimFile"
-    Write-Ok "qmt-server 启动前设置: `$env:QMT_BRIDGE_BIGQMT_SHIM_DIR = '$ShimOutDir'"
-} else {
-    Fail "shim 未落盘（$shimFile 不存在）—— 检查 --shim-out 与站点包里的 xtquant shim"
-}
+Write-Ok "QMT 侧文件 + local_config（已存在则保留）部署完成"
 
 # =================================================================
 # 步骤 4/6 redis-py 3.5.3 → QMT 内置 Python 3.6
@@ -410,7 +404,11 @@ try:
 except Exception:
     import traceback; traceback.print_exc(file=log)
 log.close()
-"@ | Out-File -FilePath $checkPy -Encoding ascii
+"@ | Out-File -FilePath $checkPy -Encoding utf8   # 同上：$QmtPythonDir 可能含中文（如 D:\国金证券QMT交易端）
+# 先删旧日志再启动：轮询判据是「文件存在且非空」，上次运行留下的旧日志
+# 会让轮询立刻命中旧内容（新 pythonw 还没来得及截断文件），一次失败的
+# 自检可能被上一轮的旧 OK 掩盖 —— 删掉就只剩「本轮结果」一种可能。
+Remove-Item $checkLog -Force -ErrorAction SilentlyContinue
 # $QmtPythonDir = "<QMT>\python" → pythonw 在 "<QMT>\bin.x64\"
 $pythonw = Join-Path (Split-Path -Parent $QmtPythonDir) "bin.x64\pythonw.exe"
 & $pythonw $checkPy | Out-Null
@@ -447,7 +445,7 @@ Write-Host @"
     [C] 验证：日志出现
         $QmtPythonDir\logs\bigqmt.log → [bigqmt_rpc] ... allow_order_methods=False
     [D] qmt-server 侧连通验证：
-        `$env:QMT_BRIDGE_BIGQMT_SHIM_DIR='$ShimOutDir'; `$env:BIGQMT_ACCOUNT_ID='$AccountId'
+        `$env:BIGQMT_ACCOUNT_ID='$AccountId'
         qmt-server --trader-backend bigqmt
     详见仓库根 deploy-user-guide.md（§3.5 起为手工步骤，§7 为故障排查）
 "@ -ForegroundColor White

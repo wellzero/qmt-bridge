@@ -2,7 +2,7 @@
 
 > 状态：设计已定稿（2026-08-26）；**§6 步骤 1（后端抽象 PR）已实施** ——
 > `TraderBackend` 协议 + `MiniQmtBackend` / `BigQmtAdapter` 双后端 +
-> 能力位降级 + CLI 开关 + xtdata shim 安装器 + 部署脚本，测试全 mock 通过。
+> 能力位降级 + CLI 开关 + xtdata 来源选择器 + 部署脚本，测试全 mock 通过。
 > 背景：券商自 2026-07-06 起停用 miniQMT（独立交易 / xtquant 外部直连），存量客户 1~2 个月内清退。
 
 ## 1. 背景
@@ -42,11 +42,11 @@ qmt-bridge 当前在 QMT 客户端**外部**运行，直连 miniQMT 进程：
 ┌─ Windows ─────────────────▼──────────────────────────────────────┐
 │  qmt-server（FastAPI，本仓库 server/）                             │
 │    ├─ paper-trading → server/paper_trading/ 本地撮合引擎           │
-│    │    价格源 = 行情（经 shim 的 xtdata.get_full_tick）           │
+│    │    价格源 = 行情（xtdata_source 解析的 xtdata.get_full_tick） │
 │    └─ live-trading → 交易适配层（bigqmt 模式，逐方法映射 §4）       │
 │           │                                                       │
 │           │  xtquant_big_convert 客户端（pip，运行在 qmt-server 内）│
-│           │  Redis / ZMQ RPC ＋ xtquant import shim（行情）        │
+│           │  Redis / ZMQ RPC ＋ xtquant_compat（行情）              │
 │  ┌────────▼──────────────────────────────────────────────────┐   │
 │  │ 完整版QMT（big QMT client，同机）                            │   │
 │  │   └─ 内置Python：xtquant_big_convert 服务端                  │   │
@@ -83,7 +83,7 @@ qmt-server 及其上层策略不感知差别。
 |----|------|------|
 | live/paper 策略、仪表盘 | Linux | 照常通过 qmt-bridge 客户端调 REST/WS API（零改动） |
 | qmt-bridge 客户端 | Linux（本仓库 `client/`） | 纯通道：HTTP/WS 到 Windows qmt-server，不感知后端切换 |
-| qmt-server | Windows（本仓库 `server/`，FastAPI） | 对外 API 不变；live 走交易适配层（bigqmt 模式逐方法映射，§4）；xtdata 经 shim 透明转发 |
+| qmt-server | Windows（本仓库 `server/`，FastAPI） | 对外 API 不变；live 走交易适配层（bigqmt 模式逐方法映射，§4）；xtdata 由 xtdata_source 按后端透明解析（§3.3） |
 | （qmt-server 内）paper-trading | Windows，qmt-server 进程内 | `PaperQuantTrader` 本地撮合，**不向 QMT 发任何委托**，仅消费行情价格 |
 | xtquant_big_convert 客户端 | Windows（qmt-server 进程内，pip） | 把交易/行情调用翻译成 Redis/ZMQ RPC |
 | xtquant_big_convert 服务端 | Windows，完整版 QMT 内置 Python 3.6 沙箱 | 策略（`init`/`handlebar`/`adjust` 驱动）封装 `passorder`、`cancel`、`get_trade_detail_data`、行情为 RPC 服务；**必须实现 qmt-bridge 交易 API 所需方法全集（§4）** |
@@ -93,7 +93,7 @@ qmt-server 及其上层策略不感知差别。
 `server/paper_trading/engine.py` 已是完整本地引擎：本地账户状态、本地撮合、
 回调与 `XtQuantTraderCallback` 对齐、模型与 xtquant 类型对齐。
 唯一的 QMT 依赖是价格源 `XtdataPriceSource`（`get_full_tick`，
-且自带静态价格回退）。shim 生效后该价格源继续工作。
+且自带静态价格回退）。bigqmt 模式下该价格源继续工作。
 
 额外收益：经 xtquant_big_convert，`get_full_tick` 走 **FormulaServer 快路径**
 （QMT C++ 服务，端口 58600，p50 ≈ 0.07ms，不占 Python GIL），
@@ -152,25 +152,23 @@ CLI 增加 `--trader-backend mini|bigqmt`（`server/cli.py`）。
 3. **自行扩展**：在自部署的 QMT 侧服务端副本中加白名单方法
    （MIT 允许；承担与上游分叉的维护成本）
 
-### 3.3 行情 shim（零代码改动）
+### 3.3 行情通道（xtdata 来源选择器）
 
-xtquant_big_convert 附带 `xtquant` import shim。本仓库 routers/ws/scheduler
-中的 `from xtquant import xtdata` **均为模块顶层导入**（非惰性，共 23 处），
-因此必须在 `cli.py` 构建 app（触发路由导入）之前、按后端类型插入 shim 路径：
+bigqmt 后端下，本仓库 routers / ws / downloader / scheduler / paper_trading
+共 30+ 处 `from xtquant import xtdata` 必须落到 xtquant_big_convert 的客户端
+（FormulaServer 直连 + Redis RPC）。实现为**显式间接层**
+`server/xtdata_source.py`：调用处统一 `from .xtdata_source import xtdata`，
+模块导入时按 `settings.trader_backend` 解析一次并绑定——
 
-```python
-sys.path.insert(0, str(shim_src_dir))  # backend == "bigqmt" 时
-```
+- `bigqmt` → `bigqmt_signal_trader.xtquant_compat.xtdata`（上游单例；
+  editable 安装即直连源码 `src/` 本体）
+- `mini`（默认）→ 真实 `xtquant.xtdata`（miniQMT 数据服务）
 
-已实现（`server/bigqmt_shim.py`）：`qmt-server` 在 `--trader-backend bigqmt`
-时、`qmt-scheduler` 在 `QMT_BRIDGE_TRADER_BACKEND=bigqmt` 时自动安装；
-shim 目录解析顺序为 `QMT_BRIDGE_BIGQMT_SHIM_DIR`（推荐：部署脚本
-`--shim-out` 导出的专用目录，避免 wheel 顶层 `xtquant/` 覆盖 site-packages
-里的真实 xtquant）→ 已安装包自带的顶层 `xtquant`（特征检测：其
-`xttrader.py` 重导出 `bigqmt_signal_trader`）。
+不依赖 sys.path 顺序 —— 本机存在多个同名 `xtquant` 包（Lib 手动拷贝 /
+site-packages / editable checkout），顺序法容易被遮蔽/遮蔽别人。
+时序要求：`cli.py` 先 `reset_settings` 再导入 app / scheduler。
 
 `server/helpers.py`、`scheduler.py`、整个下载管线无需改动。
-注意：shim 路径必须位于真实 xtquant 之前。
 
 ### 3.4 能力开关与降级
 
@@ -244,7 +242,7 @@ xtquant_big_convert 的委托/成交/错误事件经 Redis pubsub（`exec_events
 1. **后端抽象 PR**（可脱离 QMT 环境用 mock 测试）：
    `TraderBackend` 协议 + `BigQmtAdapter` + 能力位降级 + CLI 开关
    ✅ 已完成（2026-08-26）：`server/trading/{backend,mini_backend,bigqmt_backend,manager}.py`、
-   `server/bigqmt_shim.py`、`scripts/deploy_bigqmt_server.py`、
+   `server/xtdata_source.py`、`scripts/deploy_bigqmt_server.py`、
    `pyproject.toml` `bigqmt` extra、`tests/test_trading_backends.py`
 2. **QMT 侧部署**：安装 xtquant_big_convert 服务端，**下单保持关闭**；
    `MiniQmtBackend` 与 `BigQmtAdapter` 并行运行
@@ -252,7 +250,7 @@ xtquant_big_convert 的委托/成交/错误事件经 Redis pubsub（`exec_events
    （qmt-bridge 的路由天然是比较工具），
    并逐方法实测 §4 映射表中 ✅/⚠️ 项的远端行为
 4. **开启下单灰度**：`rpc_allow_order_methods: True`，小额验证
-5. **切换**：`--trader-backend bigqmt` + xtdata shim 上线，
+5. **切换**：`--trader-backend bigqmt` 上线，
    mini 后端保留至券商关停
 
 ## 7. 参考资料

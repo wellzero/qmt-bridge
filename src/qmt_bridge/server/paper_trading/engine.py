@@ -56,7 +56,8 @@ class XtdataPriceSource:
     def __init__(self):
         self._xtdata = None
         try:
-            from xtquant import xtdata
+            from ..xtdata_source import get_xtdata
+            xtdata = get_xtdata()
 
             self._xtdata = xtdata
         except Exception:
@@ -111,7 +112,8 @@ class StaticPriceSource:
             return downloaded
 
         try:
-            from xtquant import xtdata
+            from ..xtdata_source import get_xtdata
+            xtdata = get_xtdata()
         except Exception:
             logger.warning("xtquant.xtdata 未安装或不可用，无法下载静态价格")
             return downloaded

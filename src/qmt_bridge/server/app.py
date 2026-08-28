@@ -192,6 +192,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             },
         )
 
+    # bigqmt RPC 超时 → 504。RPC-only 端点（get_market_data /
+    # get_market_last_trade_date 等未映射进 FormulaServer 白名单的调用）在
+    # QMT 端策略未运行（休市/实例停止）时会等满超时再抛 TimeoutError，
+    # 此前直接 500 且无任何线索；统一转成带提示的 504。
+    # 不做重试：超时本身即"远端不在"，重试只会拖长响应。
+    @app.exception_handler(TimeoutError)
+    async def _rpc_timeout_handler(request: Request, exc: TimeoutError):
+        return JSONResponse(
+            status_code=504,
+            content={
+                "detail": "upstream RPC timeout: %s" % exc,
+                "hint": (
+                    "bigqmt RPC-only 接口需要 QMT 端策略实例运行（交易时段）；"
+                    "行情 FormulaServer 直连部分不受影响"
+                ),
+            },
+        )
+
     # ------------------------------------------------------------------
     # 注册数据查询路由（始终可用，无需启用交易模块）
     # 这些路由底层调用 xtquant.xtdata 的各类行情数据接口

@@ -52,9 +52,27 @@ serve-debug:
 scheduler *ARGS:
     qmt-scheduler {{ARGS}}
 
+# 启动 API 服务（选择交易后端：mini=xtquant 直连 miniQMT | bigqmt=完整版 QMT RPC）
+# 走 scripts/serve_qmt_server.ps1：bigqmt 自动设账号/Redis 环境变量并预检（xtdata 经 xtdata_source 解析）
+# 使用手册: scripts/scripts-user-guide.md
+# 例: just serve-backend bigqmt | just serve-backend mini -Port 18889
+serve-backend backend="mini" *ARGS:
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts\serve_qmt_server.ps1 -Backend {{backend}} {{ARGS}}
+
 # 启动 API 服务（bigqmt 交易后端：完整版 QMT + xtquant_big_convert RPC）
+# 推荐用 just serve-backend bigqmt（同一入口，可换 -Port/-AccountId 等）
 serve-bigqmt *ARGS:
-    qmt-server --trader-backend bigqmt {{ARGS}}
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts\serve_qmt_server.ps1 -Backend bigqmt {{ARGS}}
+
+# bigqmt 全链路一键拉起：Redis 没起自动拉起 + QMT 客户端没跑自动启动 + qmt-server（bigqmt 后端）
+# 例: just start-bigqmt-service | just start-bigqmt-service -Port 18889 -Trading
+start-bigqmt-service *ARGS:
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts\start_bigqmt_service.ps1 {{ARGS}}
+
+# 下载历史行情到完整版 QMT 数据仓（mini通道下载 + 同步到 big 仓，bigqmt 后端即可读）
+# 例: just download-bigqmt --stocks 000300.SH,600519.SH --periods 1d,1m --start 20250101
+download-bigqmt *ARGS:
+    py scripts/download_bigqmt_data.py {{ARGS}}
 
 # 部署 xtquant_big_convert 服务端到完整版 QMT 内置 Python（docs/big-qmt.md §3.5）
 deploy-bigqmt *ARGS:

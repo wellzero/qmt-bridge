@@ -11,7 +11,7 @@
 """
 
 from fastapi import APIRouter, Query
-from xtquant import xtdata
+from ..xtdata_source import xtdata
 
 from ..helpers import _numpy_to_python
 
@@ -125,15 +125,29 @@ def get_connection_status():
 
     Returns:
         connected: 布尔值，表示是否已连接。
+        backend: 行情通道（bigqmt 时额外返回）。
         error: 连接异常时的错误信息（可选）。
 
-    底层调用: xtdata.get_client().get_connect_status()
+    底层调用:
+        mini   → xtdata.get_client().get_connect_status()
+        bigqmt → 兼容层无 get_client（miniQMT 专有），改用 FormulaServer
+                 白名单读探测（get_instrument_detail 命中即视为行情通道可用）
     """
+    if hasattr(xtdata, "get_client"):
+        try:
+            status = xtdata.get_client().get_connect_status()
+            return {"connected": status}
+        except Exception as e:
+            return {"connected": False, "error": str(e)}
     try:
-        status = xtdata.get_client().get_connect_status()
-        return {"connected": status}
+        probe = xtdata.get_instrument_detail("000001.SH")
+        return {
+            "connected": bool(probe),
+            "backend": "bigqmt",
+            "channel": "FormulaServer",
+        }
     except Exception as e:
-        return {"connected": False, "error": str(e)}
+        return {"connected": False, "backend": "bigqmt", "error": str(e)}
 
 
 @router.get("/health")

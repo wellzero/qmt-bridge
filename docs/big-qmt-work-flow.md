@@ -26,7 +26,7 @@ qmt-bridge 客户端（本仓库 client/，纯通道）
    │
 Windows qmt-server（FastAPI，本仓库 server/）
    │  ├─ BigQmtAdapter（交易）→ Redis/ZMQ RPC
-   │  └─ xtquant import shim（行情）→ 同一 RPC 客户端
+   │  └─ xtdata_source（行情）→ 同一 RPC 客户端
    ▼
 完整版 QMT 客户端（同机 Windows）
    └─ 内置 Python 3.6 沙箱：xtquant_big_convert 服务端
@@ -85,24 +85,21 @@ pip 安装 `qmt-bridge[bigqmt]` 后，分两条通道接入本仓库：
   缺的方法自动生成抛 `UnsupportedOperation` 的桩 → 路由返回 503
   "等待远端支持"（见文件末尾对 `CAPABILITY_METHODS` 的循环）。
 
-#### 行情通道 —— xtquant import shim
+#### 行情通道 —— xtdata 来源选择器
 
-`src/qmt_bridge/server/bigqmt_shim.py`：
+`src/qmt_bridge/server/xtdata_source.py`：
 
-- `xtquant_big_convert` 附带一个假的顶层 `xtquant` 包（import shim），
-  把 `from xtquant import xtdata` 代理到 compat 单例；
-- 因为本仓库 routers/ws/scheduler 有 23 处模块顶层 `import xtdata`
-  （非惰性），shim 必须在 `cli.py` 构建 app **之前**插到 `sys.path[0]`
-  （`server/cli.py` 中 `install_bigqmt_xtdata_shim()`）；
-- shim 目录解析顺序：
-  1. `QMT_BRIDGE_BIGQMT_SHIM_DIR` 显式指定（推荐：部署脚本 `--shim-out`
-     导出的专用目录，避免 wheel 顶层 `xtquant/` 覆盖 site-packages 里的
-     真实 xtquant）；
-  2. 已安装包自带的顶层 `xtquant`（经特征检测：其 `xttrader.py` 重导出
-     `bigqmt_signal_trader`，见 `_looks_like_shim()`）。
-- 生效后 routers / ws / scheduler **零代码改动**；额外收益：
-  `get_full_tick` 走 FormulaServer 快路径（QMT C++ 服务，端口 58600，
-  p50 ≈ 0.07ms，不占 Python GIL）。
+- 本仓库 routers / ws / downloader / scheduler / paper_trading 共 30+ 处
+  `from xtquant import xtdata` 统一改为 `from .xtdata_source import xtdata`；
+- 模块导入时按 `settings.trader_backend` 解析一次并绑定：
+  `bigqmt` → `bigqmt_signal_trader.xtquant_compat.xtdata`（上游单例，
+  editable 安装即直连源码 `src/` 本体），`mini`（默认）→ 真实
+  `xtquant.xtdata`；
+- 显式间接层，不依赖 sys.path 顺序 —— 本机存在多个同名 `xtquant` 包
+  （Lib 手动拷贝 / site-packages / editable checkout），顺序法易被遮蔽；
+- 时序要求：`cli.py` 先 `reset_settings` 再导入 app / scheduler；
+- 额外收益：`get_full_tick` 走 FormulaServer 快路径（QMT C++ 服务，
+  端口 58600，p50 ≈ 0.07ms，不占 Python GIL）。
 
 ## 4. 关键约束（big-qmt.md §5）
 
@@ -120,17 +117,18 @@ pip 安装 `qmt-bridge[bigqmt]` 后，分两条通道接入本仓库：
 # 1. 安装客户端（qmt-server 机器）
 pip install 'qmt-bridge[server,bigqmt]'
 
-# 2. 部署服务端到 QMT 内置 Python（先 --dry-run 预览）
+# 2. 部署服务端到 QMT 内置 Python（先 --dry-run 预览；源自动取
+#    import bigqmt_signal_trader 的落点，覆盖前自动备份旧文件）
 python scripts/deploy_bigqmt_server.py --dry-run
 python scripts/deploy_bigqmt_server.py \
     --qmt-python-dir "D:\国金QMT交易端\..\python" \
-    --account-id 12345678 --shim-out <shim目录>
+    --account-id 12345678
 
 # 3. 在 QMT 内置 Python 中运行 BIGQMT_REDIS_DRYRUN.py（下单保持关闭）
 
-# 4. qmt-server 切到 bigqmt 后端（shim 目录指向 --shim-out 导出位置）
+# 4. qmt-server 切到 bigqmt 后端（行情由 xtdata_source 自动解析）
 qmt-server --trader-backend bigqmt
-#   或环境变量：QMT_BRIDGE_TRADER_BACKEND=bigqmt + QMT_BRIDGE_BIGQMT_SHIM_DIR=...
+#   或环境变量：QMT_BRIDGE_TRADER_BACKEND=bigqmt
 ```
 
 灰度顺序：双后端并行 → 资产/持仓/委托/成交逐字段比对 →
@@ -145,7 +143,7 @@ qmt-server --trader-backend bigqmt
 | `src/qmt_bridge/server/trading/bigqmt_backend.py` | BigQmtAdapter（交易后端，逐方法映射 + 能力位降级） |
 | `src/qmt_bridge/server/trading/backend.py` | `TraderBackend` 协议 + `CAPABILITY_METHODS` 能力位分组 |
 | `src/qmt_bridge/server/trading/mini_backend.py` | 现有 XtQuantTrader 实现（原样保留） |
-| `src/qmt_bridge/server/bigqmt_shim.py` | xtdata import shim 安装器（行情通道） |
-| `src/qmt_bridge/server/cli.py` | `--trader-backend` / `--bigqmt-shim-dir` 开关 |
-| `scripts/deploy_bigqmt_server.py` | QMT 侧服务端部署 + shim 导出 |
+| `src/qmt_bridge/server/xtdata_source.py` | xtdata 来源选择器（行情通道，按后端显式解析） |
+| `src/qmt_bridge/server/cli.py` | `--trader-backend` 开关 |
+| `scripts/deploy_bigqmt_server.py` | QMT 侧服务端部署（源解析 + 备份 + 遗留告警） |
 | `tests/test_trading_backends.py` | 双后端测试（全 mock，脱离 QMT 环境） |
