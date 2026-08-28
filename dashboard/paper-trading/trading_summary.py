@@ -77,12 +77,13 @@ def _do_fetch_prices() -> None:
         return
 
     try:
-        prices = fetch_prices_from_server(
-            server_host,
-            int(server_port),
-            server_api_key,
-            sorted(all_stock_codes),
-        )
+        with st.spinner("正在从 qmt-server 拉取最新价（超时将自动重试一次）…"):
+            prices = fetch_prices_from_server(
+                server_host,
+                int(server_port),
+                server_api_key,
+                sorted(all_stock_codes),
+            )
     except Exception as exc:
         st.error(f"获取行情失败：{exc}")
         return

@@ -5,6 +5,8 @@
 - 账户：今日委托/废单、最后交易时间、持仓与实时盈亏
 - 进程：策略日志（默认 ``PAPER_TEST_LOG_DIR``，可用侧边栏修改）的最后
   写入时间与近期错误，用于判断策略是否仍在运行
+- 控制：每个策略可单独 启动 / 停止 / 重启（复用
+  ``run_all_paper_tests.py`` 的 PID 文件管理，与命令行行为一致）
 
 页面每分钟自动刷新（可在侧边栏关闭）。告警区固定高度、可滚动浏览全部条目；
 点击策略进程行可翻页浏览该日志的完整历史（第 1 页为最新）。
@@ -34,6 +36,13 @@ from monitor import (
     tail_log_lines,
 )
 from pricing import is_trading_hours, load_price_cache_raw
+from process_control import (
+    CTRL_RUNNING,
+    CTRL_STOPPED,
+    ORCHESTRATOR_FILE,
+    list_strategy_controls,
+    perform_action,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -282,6 +291,80 @@ def _render_alert_detail(
     # plain：告警标题即全部内容，无需展开详情
 
 
+# ── 进程控制（启动 / 停止 / 重启）─────────────────────────────────────
+
+# 控制面板排序：运行中优先，其次 PID 异常，最后已停止
+_CTRL_ORDER = {CTRL_RUNNING: 0, "DEAD_PID_FILE": 1, "BAD_PID_FILE": 2, CTRL_STOPPED: 3}
+
+
+def _control_status_label(control: dict) -> str:
+    """把 PID 状态渲染为带图标的文案。"""
+    status = control["status"]
+    if status == CTRL_RUNNING:
+        return f"🟢 运行中 (pid {control['pid']})"
+    if status == "DEAD_PID_FILE":
+        return "🟠 进程已退出（PID 残留）"
+    if status == "BAD_PID_FILE":
+        return "🟠 PID 文件损坏"
+    if status == CTRL_STOPPED:
+        return "⚪ 已停止"
+    return status
+
+
+def _render_action_buttons(
+    cols: tuple,
+    stem: str,
+    control: dict | None,
+    key_prefix: str,
+) -> None:
+    """在给定三列中渲染单个策略的 启动 / 停止 / 重启 按钮并处理点击。
+
+    Args:
+        cols: ``(start_col, stop_col, restart_col)`` 三个 st.columns 元素。
+        stem: 策略基名（日志/PID 文件名去扩展名）。
+        control: ``list_strategy_controls`` 中该策略的状态项；``None`` 表示
+            不在编排脚本管理范围内（按钮全部禁用）。
+        key_prefix: 按钮-key 前缀，同一 stem 在不同区块需不同前缀。
+    """
+    status = control["status"] if control else "NOT_MANAGED"
+    is_running = status == CTRL_RUNNING
+    # 无 PID 文件时 stop/restart 无意义（restart 本质是 stop+start）
+    has_pid_file = status in (CTRL_RUNNING, "DEAD_PID_FILE", "BAD_PID_FILE")
+    start_col, stop_col, restart_col = cols
+
+    action: str | None = None
+    if start_col.button(
+        "▶ 启动",
+        key=f"{key_prefix}start::{stem}",
+        use_container_width=True,
+        disabled=is_running or control is None,
+    ):
+        action = "start"
+    if stop_col.button(
+        "⏹ 停止",
+        key=f"{key_prefix}stop::{stem}",
+        use_container_width=True,
+        disabled=not has_pid_file or control is None,
+    ):
+        action = "stop"
+    if restart_col.button(
+        "🔄 重启",
+        key=f"{key_prefix}restart::{stem}",
+        use_container_width=True,
+        disabled=not has_pid_file or control is None,
+    ):
+        action = "restart"
+
+    if action:
+        result = perform_action(stem, action)
+        ok = "ERROR" not in result["status"] and "ORCHESTRATOR" not in result["status"]
+        st.toast(f"{stem}：{result['status']}", icon="✅" if ok else "❌")
+        logger.info("进程控制 %s %s -> %s", action, stem, result["status"])
+        # 立即失效状态缓存，让表格与本面板反映最新 PID 状态
+        st.cache_data.clear()
+        st.rerun(scope="fragment")
+
+
 # ── 监控主体（自动刷新的 fragment）───────────────────────────────────
 
 _refresh_secs = (
@@ -305,6 +388,17 @@ def _render_monitor() -> None:
         if log_dir.exists()
         else pd.DataFrame()
     )
+
+    # 策略基名 ↔ 关联账户 双向映射 + 受管策略的 PID 状态（进程控制用）
+    stem_to_account: dict[str, str] = {}
+    if not log_df.empty:
+        for _, log_row in log_df.iterrows():
+            if log_row["account_id"]:
+                stem = str(log_row["log_file"]).removesuffix(".log")
+                stem_to_account.setdefault(stem, str(log_row["account_id"]))
+    account_to_stem = {aid: stem for stem, aid in stem_to_account.items()}
+    controls = list_strategy_controls()
+    controls_by_stem = {c["stem"]: c for c in controls} if controls else {}
 
     # ── 总览卡片 ──
     today_traded = int((status_df["orders_today"] > 0).sum())
@@ -551,6 +645,48 @@ def _render_monitor() -> None:
         render_account_detail(
             data_dir, selected_account, config.get(selected_account, {})
         )
+        # 该账户对应策略的 启动 / 停止 / 重启 按钮
+        stem = account_to_stem.get(selected_account)
+        if stem:
+            st.markdown(f"#### ⚙️ 策略进程控制：`{stem}`")
+            _render_action_buttons(
+                st.columns(3), stem, controls_by_stem.get(stem), "acct_"
+            )
+            if stem not in controls_by_stem:
+                st.caption("该策略不在编排脚本管理列表内，无法通过按钮控制")
+        elif controls is not None:
+            st.caption("该账户未关联策略日志，无法定位对应策略进程")
+
+    # ── 进程控制 ──
+    st.markdown("---")
+    st.markdown("### ⚙️ 进程控制（逐个策略 启动 / 停止 / 重启）")
+    if controls is None:
+        st.warning(f"未找到编排脚本 ``{ORCHESTRATOR_FILE}``，进程控制不可用")
+    else:
+        running = sum(1 for c in controls if c["status"] == CTRL_RUNNING)
+        st.caption(
+            f"共 {len(controls)} 个策略，运行中 {running} 个；"
+            "按 PID 文件操作，与 ``run_all_paper_tests.py`` 命令行行为一致"
+        )
+        ordered = sorted(
+            controls, key=lambda c: (_CTRL_ORDER.get(c["status"], 4), c["stem"])
+        )
+        # 固定高度可滚动：策略再多也不撑长页面
+        with st.container(height=430):
+            header_cols = st.columns((4.6, 2.2, 1, 1, 1))
+            header_cols[0].caption("策略（关联账户）")
+            header_cols[1].caption("进程状态")
+            for control in ordered:
+                row = st.columns((4.6, 2.2, 1, 1, 1))
+                account = stem_to_account.get(control["stem"])
+                row[0].write(
+                    f"``{control['stem']}``"
+                    + (f" ｜ {account}" if account else "")
+                )
+                row[1].write(_control_status_label(control))
+                _render_action_buttons(
+                    (row[2], row[3], row[4]), control["stem"], control, "ctrl_"
+                )
 
     # ── 策略进程表 ──
     st.markdown("---")
