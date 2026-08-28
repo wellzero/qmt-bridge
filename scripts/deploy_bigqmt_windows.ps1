@@ -79,6 +79,7 @@ if ($RepoDir -like "\\*") {
     Write-Warn2 "仓库在 UNC 路径 ($RepoDir)，pip -e 可能失败；建议 -RepoDir 传本地路径（如 junction）"
 }
 Write-Ok "仓库: $RepoDir"
+Write-Ok "shim 导出目录: $ShimOutDir   (Redis 目录: $RedisDir)"
 
 # editable 解析检查（防止旧 editable 指向其它 checkout 遮蔽本仓库）
 $res = Get-QmtBridgeResolution $RepoDir
@@ -169,6 +170,14 @@ $depArgs = @(
 & py @depArgs
 if ($LASTEXITCODE -ne 0) { Fail "部署脚本退出码 $LASTEXITCODE" }
 Write-Ok "QMT 侧文件 + local_config（已存在则保留）+ shim 导出完成"
+# shim 落盘验证 + qmt-server 侧用法提示（QMT_BRIDGE_BIGQMT_SHIM_DIR 指向这里）
+$shimFile = Join-Path $ShimOutDir "xtquant\xtdata.py"
+if (Test-Path $shimFile) {
+    Write-Ok "shim 位置: $shimFile"
+    Write-Ok "qmt-server 启动前设置: `$env:QMT_BRIDGE_BIGQMT_SHIM_DIR = '$ShimOutDir'"
+} else {
+    Fail "shim 未落盘（$shimFile 不存在）—— 检查 --shim-out 与站点包里的 xtquant shim"
+}
 
 # ---------------------------------------------------------------- 4. redis-py 3.5.3
 Write-Step "步骤 4/6 redis-py 3.5.3 → QMT 内置 Python 3.6"
