@@ -60,6 +60,11 @@ serve-bigqmt *ARGS:
 deploy-bigqmt *ARGS:
     python scripts/deploy_bigqmt_server.py {{ARGS}}
 
+# 一键部署 bigqmt 全套（依赖 + Redis + QMT 侧文件 + 自检；手工 UI 步骤见 deploy-user-guide.md §3.5）
+# 例: just deploy-bigqmt-full  |  just deploy-bigqmt-full -QmtPythonDir "D:\国金QMT\python" -AccountId 12345678
+deploy-bigqmt-full *ARGS:
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy_bigqmt_windows.ps1 {{ARGS}}
+
 # 启动定时下载调度器（调试模式）
 scheduler-debug:
     qmt-scheduler --log-level debug

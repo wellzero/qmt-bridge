@@ -48,6 +48,18 @@ REST/WS 调用  ──────────►  qmt-bridge (qmt-server)
 
 ## 3. 部署步骤
 
+> **一键部署**：§3.1–3.4 已封装为 `scripts/deploy_bigqmt_windows.ps1`
+> （依赖安装 → Redis 下载/启动 → QMT 侧文件 → redis-py 3.5.3 → 内置
+> Py3.6 自检，幂等可重跑），等价 `just deploy-bigqmt-full`：
+>
+> ```powershell
+> just deploy-bigqmt-full                       # 本机默认（QMT_Simulator / 88002471 / 127.0.0.1:6379/db5）
+> just deploy-bigqmt-full -QmtPythonDir "D:\国金QMT\python" -AccountId 12345678   # 其它客户端
+> ```
+>
+> 跑完后按 §3.5–3.6 在 QMT 客户端里做两步**手工 UI 操作**即可。
+> 以下 §3.1–3.4 为各步骤明细（排障或手工分步执行时参考）。
+
 ### 3.1 qmt-server 侧安装（部署机，一次性）
 
 ```powershell
