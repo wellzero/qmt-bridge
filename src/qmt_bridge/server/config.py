@@ -89,6 +89,12 @@ class Settings:
     paper_trading_enabled: bool = False  # 是否启用模拟交易模块
     paper_trading_data_dir: str = ""  # 模拟交易数据目录
     paper_trading_config_path: str = ""  # 模拟交易配置文件路径（可选）
+    # 模拟交易默认账户 ID（留空回落到 trading_account_id）。与实盘资金账号
+    # 分离：trading_account_id 必须是 QMT 资金账号（bigqmt 模式下还须与
+    # QMT 侧 local_config 的 BIGQMT_ACCOUNT_ID 一致），而模拟账户是
+    # ``*_paper`` 命名的本地引擎账户——共用一个值会把纸面账户写进
+    # bigqmt RPC 队列键（bigqmt:rpc:queue:<账号>），表现为 ping 超时。
+    paper_trading_account_id: str = ""
 
     # ---- 通知模块配置 ----
     notify_enabled: bool = False  # 是否启用通知推送
@@ -152,6 +158,9 @@ class Settings:
             ),
             paper_trading_config_path=os.environ.get(
                 "QMT_BRIDGE_PAPER_TRADING_CONFIG_PATH", ""
+            ),
+            paper_trading_account_id=os.environ.get(
+                "QMT_BRIDGE_PAPER_TRADING_ACCOUNT_ID", ""
             ),
             # 通知相关配置
             notify_enabled=os.environ.get("QMT_BRIDGE_NOTIFY_ENABLED", "").lower()
