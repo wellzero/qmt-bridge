@@ -15,9 +15,14 @@
     - QMT_BRIDGE_TRADING_ENABLED: 是否启用交易模块
 """
 
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
+
+# bigqmt 后端可选 RPC 通道（与上游 transports/factory.KNOWN_TRANSPORTS 对齐）：
+# redis（默认）/ zmq / mysql / shm（上游占位，首次调用即抛 TransportError）
+BIGQMT_RPC_TRANSPORTS = ("redis", "zmq", "mysql", "shm")
 
 
 def _load_env_file(env_path: Path | None = None) -> None:

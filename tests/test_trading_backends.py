@@ -577,7 +577,7 @@ def test_connection_status_bigqmt_probe(bigqmt_app, monkeypatch):
 
 
 def test_connection_status_mini_uses_get_client(bigqmt_app, monkeypatch):
-    """mini 通道保持原语义：get_client().get_connect_status()。"""
+    """mini 通道：get_client().get_connect_status()（新版 xtquant）。"""
     from qmt_bridge.server.routers import meta
 
     class _MiniXtdata:
@@ -588,7 +588,41 @@ def test_connection_status_mini_uses_get_client(bigqmt_app, monkeypatch):
     client = TestClient(bigqmt_app)
     resp = client.get("/api/meta/connection_status")
     assert resp.status_code == 200
-    assert resp.json() == {"connected": True}
+    assert resp.json() == {"connected": True, "backend": "mini"}
+
+
+def test_connection_status_mini_is_connected_fallback(bigqmt_app, monkeypatch):
+    """mini 通道：手动拷贝版 xtquant 无 get_connect_status → is_connected()。"""
+    from qmt_bridge.server.routers import meta
+
+    class _MiniXtdata:
+        def get_client(self):
+            return SimpleNamespace(is_connected=lambda: True)
+
+    monkeypatch.setattr(meta, "xtdata", _MiniXtdata())
+    client = TestClient(bigqmt_app)
+    resp = client.get("/api/meta/connection_status")
+    assert resp.status_code == 200
+    assert resp.json() == {"connected": True, "backend": "mini"}
+
+
+def test_connection_status_mini_probe_fallback(bigqmt_app, monkeypatch):
+    """mini 通道：客户端两个状态方法都没有 → get_instrument_detail 探测。"""
+    from qmt_bridge.server.routers import meta
+
+    class _MiniXtdata:
+        def get_client(self):
+            return SimpleNamespace()
+
+        def get_instrument_detail(self, code):
+            assert code == "000001.SH"
+            return {"InstrumentName": "平安银行"}
+
+    monkeypatch.setattr(meta, "xtdata", _MiniXtdata())
+    client = TestClient(bigqmt_app)
+    resp = client.get("/api/meta/connection_status")
+    assert resp.status_code == 200
+    assert resp.json() == {"connected": True, "backend": "mini"}
 
 
 # ------------------------------------------------------------------
