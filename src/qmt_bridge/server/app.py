@@ -81,7 +81,10 @@ async def _lifespan(app: FastAPI):
             paper_manager = PaperTraderManager(
                 data_dir=settings.paper_trading_data_dir or None,
                 config_path=settings.paper_trading_config_path or None,
-                default_account_id=settings.trading_account_id,
+                # 模拟账户默认 ID 与实盘资金账号分离（config.py 字段注释），
+                # 未单独配置时维持旧行为回落到 trading_account_id
+                default_account_id=settings.paper_trading_account_id
+                or settings.trading_account_id,
             )
             paper_manager.connect()
             app.state.paper_trader_manager = paper_manager

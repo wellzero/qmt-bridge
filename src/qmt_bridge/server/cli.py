@@ -114,8 +114,15 @@ def main():
     # xtdata_source 按本参数解析到 xtquant_big_convert（docs/big-qmt.md §3.3
     # v2）。必须在 create_app / 惰性导入触发之前 reset_settings（下方即做）。
 
-    # 用命令行参数构建 Settings 对象（覆盖环境变量中的默认值）
-    settings = Settings(
+    # 以 from_env()（环境变量 + .env）为底、命令行参数覆盖对应字段，
+    # 严格实现文档声明的优先级「命令行参数 > 系统环境变量 > .env 文件」。
+    # 此前手工逐字段构造 Settings，凡无 CLI 旗标的配置项（paper 数据目录 /
+    # paper 默认账户 / 通知 / require_auth_for_data / scheduler 等）会被
+    # 静默丢弃成 dataclass 默认值——.env 里配了也不生效。
+    from dataclasses import replace
+
+    settings = replace(
+        Settings.from_env(),
         host=args.host,
         port=args.port,
         log_level=args.log_level,

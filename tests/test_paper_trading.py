@@ -561,3 +561,29 @@ def datetime_now_str() -> str:
     from datetime import datetime
 
     return datetime.now().strftime("%Y%m%d")
+
+
+def test_settings_paper_account_id_separate_from_trading(monkeypatch, tmp_path):
+    """模拟账户默认 ID 与实盘资金账号分离（QMT_BRIDGE_PAPER_TRADING_ACCOUNT_ID）。
+
+    回归背景：trading_account_id 同时充当 bigqmt RPC 队列键里的真实资金
+    账号和模拟引擎默认账户。若 .env 把模拟账户名（如 blue_chip_paper）
+    填进 QMT_BRIDGE_TRADING_ACCOUNT_ID，裸启动 ``qmt-server --trader-backend
+    bigqmt`` 会把纸面账户写进 RPC 队列键（表现为 ping 超时）。两个配置
+    必须能各自独立设置；paper 侧未设置时维持旧行为回落到 trading 侧。
+    """
+    from qmt_bridge.server.config import Settings
+
+    missing_env = tmp_path / "no.env"  # 不存在的路径 → 不加载任何 .env 文件
+
+    monkeypatch.setenv("QMT_BRIDGE_TRADING_ACCOUNT_ID", "88002471")
+    monkeypatch.setenv("QMT_BRIDGE_PAPER_TRADING_ACCOUNT_ID", "blue_chip_paper")
+    settings = Settings.from_env(missing_env)
+    assert settings.trading_account_id == "88002471"
+    assert settings.paper_trading_account_id == "blue_chip_paper"
+
+    # 未单独配置模拟账户时：字段为空，app.py 回落表达式仍取实盘账号
+    monkeypatch.delenv("QMT_BRIDGE_PAPER_TRADING_ACCOUNT_ID")
+    settings = Settings.from_env(missing_env)
+    assert settings.paper_trading_account_id == ""
+    assert settings.paper_trading_account_id or settings.trading_account_id == "88002471"
