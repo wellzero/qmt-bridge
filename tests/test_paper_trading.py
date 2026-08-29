@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -18,6 +20,7 @@ from qmt_bridge.server.paper_trading.engine import (
     StaticPriceSource,
 )
 from qmt_bridge.server.paper_trading.papertrader import PaperAccount
+from qmt_bridge.server.paper_trading.request_queue import PaperRequestQueue
 from qmt_bridge.server.paper_trading.storage import AccountSummary, PaperTradingStorage
 
 
@@ -398,10 +401,7 @@ def test_router_download_prices_with_mock(temp_data_dir: Path):
         # 验证配置已持久化
         resp = client.get("/api/paper_accounts/api_download", headers=headers)
         assert resp.status_code == 200
-        assert (
-            resp.json()["data"]["static_prices"]["000001.SZ"]
-            == pytest.approx(12.34)
-        )
+        assert resp.json()["data"]["static_prices"]["000001.SZ"] == pytest.approx(12.34)
 
 
 def test_static_price_source_download_with_mock():
@@ -586,4 +586,192 @@ def test_settings_paper_account_id_separate_from_trading(monkeypatch, tmp_path):
     monkeypatch.delenv("QMT_BRIDGE_PAPER_TRADING_ACCOUNT_ID")
     settings = Settings.from_env(missing_env)
     assert settings.paper_trading_account_id == ""
-    assert settings.paper_trading_account_id or settings.trading_account_id == "88002471"
+    assert (
+        settings.paper_trading_account_id or settings.trading_account_id == "88002471"
+    )
+
+
+# ── 请求队列：多账户并发提交、单线程逐个串行执行 ──
+
+
+def test_request_queue_serializes_concurrent_ops():
+    """多线程并发 submit 时操作严格串行执行且结果正确返回。"""
+    q = PaperRequestQueue()
+    q.start()
+
+    lock = threading.Lock()
+    state = {"active": 0, "peak": 0}
+
+    def make_op(i: int):
+        def op():
+            with lock:
+                state["active"] += 1
+                state["peak"] = max(state["peak"], state["active"])
+            time.sleep(0.005)
+            with lock:
+                state["active"] -= 1
+            return i * 2
+
+        return op
+
+    results: list[int] = []
+    results_lock = threading.Lock()
+
+    def submit_from_thread(i: int):
+        result = q.submit("test_op", f"acc{i}", make_op(i))
+        with results_lock:
+            results.append(result)
+
+    threads = [
+        threading.Thread(target=submit_from_thread, args=(i,)) for i in range(10)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(10)
+
+    assert sorted(results) == [i * 2 for i in range(10)]
+    # 任何时刻至多 1 个操作在执行（严格串行）
+    assert state["peak"] == 1
+
+    stats = q.stats()
+    assert stats["processed"] == 10
+    assert stats["failed"] == 0
+    assert stats["queue_size"] == 0
+    assert stats["worker_alive"] is True
+    q.stop()
+
+
+def test_request_queue_reentrancy_inline():
+    """工作线程内嵌套 submit 直接内联执行，不产生死锁。"""
+    q = PaperRequestQueue()
+    q.start()
+
+    def outer():
+        # 工作线程内嵌套 submit：应立即内联执行而非排队等待自身
+        return q.submit("inner_op", "acc", lambda: "inner-result")
+
+    assert q.submit("outer_op", "acc", outer) == "inner-result"
+    q.stop()
+
+
+def test_request_queue_timeout():
+    """工作线程被占用时，后续请求等待超时抛出 TimeoutError。"""
+    q = PaperRequestQueue()
+    q.start()
+
+    release = threading.Event()
+    entered = threading.Event()
+
+    def blocker():
+        entered.set()
+        release.wait(10)
+        return "done"
+
+    # 阻塞工作线程的请求在后台线程提交（submit 会阻塞至完成）
+    holder = threading.Thread(target=lambda: q.submit("block_op", "acc", blocker))
+    holder.start()
+    assert entered.wait(2)
+
+    with pytest.raises(TimeoutError):
+        q.submit("quick_op", "acc", lambda: 1, timeout=0.1)
+
+    release.set()
+    holder.join(5)
+    q.stop()
+
+
+def test_request_queue_error_replay():
+    """操作抛出的异常原样向提交方重放，并计入失败统计。"""
+    q = PaperRequestQueue()
+    q.start()
+
+    def boom():
+        raise ValueError("boom")
+
+    with pytest.raises(ValueError, match="boom"):
+        q.submit("bad_op", "acc", boom)
+
+    stats = q.stats()
+    assert stats["failed"] == 1
+    assert "bad_op" in stats["last_error"]
+    q.stop()
+
+
+def test_concurrent_orders_all_processed_via_queue(
+    trader: PaperQuantTrader, temp_data_dir: Path
+):
+    """多账户同时下单：请求并发入队缓存，逐个串行处理，资金更新正确。"""
+    accounts = [f"acc_multi_{i}" for i in range(4)]
+    for aid in accounts:
+        config = PaperAccountConfig(
+            account_id=aid,
+            initial_cash=100000.0,
+            price_source="static",
+            static_prices={"000001.SZ": 10.0},
+            commission_rate=0.0,
+            min_commission=0.0,
+            stamp_tax_rate=0.0,
+        )
+        trader.create_account(config)
+
+    errors: list[Exception] = []
+
+    def submit_order(aid: str):
+        try:
+            trader.order_stock(
+                account=PaperAccount(aid),
+                stock_code="000001.SZ",
+                order_type=STOCK_BUY,
+                order_volume=100,
+                price_type=FIX_PRICE,
+                price=10.0,
+            )
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=submit_order, args=(aid,)) for aid in accounts]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(20)
+
+    assert not errors
+    for aid in accounts:
+        asset = trader.query_stock_asset(PaperAccount(aid))
+        assert asset is not None
+        assert asset.cash == pytest.approx(99000.0)
+
+    stats = trader.queue_status()
+    # 4 个 create_account + 4 笔下单 + 4 次资产查询均经队列处理
+    assert stats["processed"] >= 12
+    assert stats["worker_alive"] is True
+
+
+def test_queue_status_endpoint(temp_data_dir: Path):
+    """queue_status 端点返回队列统计（需 xtquant 环境）。"""
+    pytest.importorskip("xtquant")
+
+    from fastapi.testclient import TestClient
+
+    from qmt_bridge.server.app import create_app
+    from qmt_bridge.server.config import Settings, reset_settings
+
+    settings = Settings(
+        host="0.0.0.0",
+        port=8000,
+        api_key="test-key",
+        paper_trading_enabled=True,
+        paper_trading_data_dir=str(temp_data_dir),
+    )
+    reset_settings(settings)
+
+    app = create_app(settings)
+    with TestClient(app) as client:
+        headers = {"X-API-Key": "test-key"}
+        resp = client.get("/api/paper_trading/queue_status", headers=headers)
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert data["worker_alive"] is True
+        assert data["queue_size"] == 0
+        assert data["processed"] == 0

@@ -29,6 +29,7 @@ from .engine import (
     StaticPriceSource,
     XtdataPriceSource,
 )
+from .request_queue import PaperRequestQueue
 from .models import (
     XtAccountStatus,
     XtAsset,
@@ -64,6 +65,10 @@ class PaperQuantTrader:
 
     与 ``xtquant.xttrader.XtQuantTrader`` 公开 API 对齐，
     内部维护多个 ``AccountState``，按 ``account_id`` 隔离资金、持仓、委托与成交。
+
+    所有触及 QMT 的操作（下单、撤单、行情价格拉取、资产/持仓刷新等）
+    通过 ``PaperRequestQueue`` 缓存：多账户可并发提交，由单一工作线程
+    逐个串行执行，避免并发调用 xtquant 触发 BSON 数据竞争。
     """
 
     def __init__(self, path: str, session_id: int, callback: Any | None = None):
@@ -77,6 +82,7 @@ class PaperQuantTrader:
         self._config_manager = PaperAccountConfigManager()
         self._storage = self._config_manager.storage
         self._engine = MatchingEngine()
+        self._request_queue = PaperRequestQueue()
         self._seq = itertools.count(1)
         self._lock = threading.RLock()
 
@@ -321,13 +327,35 @@ class PaperQuantTrader:
     def start(self) -> None:
         """启动模拟交易器。"""
         self._started = True
+        self._request_queue.start()
         logger.info("PaperQuantTrader started, session_id=%s", self.session_id)
 
     def stop(self) -> None:
         """停止模拟交易器。"""
         self._started = False
         self._connected = False
+        self._request_queue.stop()
         logger.info("PaperQuantTrader stopped")
+
+    def submit_qmt_op(self, op: str, account_id: str, fn) -> Any:
+        """将触及 QMT 的操作提交到请求队列，由工作线程逐个串行执行。
+
+        多账户可同时调用本方法，请求在队列中缓存后按 FIFO 顺序处理。
+        工作线程内部的嵌套提交会直接内联执行（由队列的重入保护处理）。
+
+        Args:
+            op: 操作名，用于日志与队列统计。
+            account_id: 发起操作的账户 ID。
+            fn: 无参可调用对象，在工作线程中执行并返回结果。
+
+        Returns:
+            ``fn()`` 的返回值（含异常重放）。
+        """
+        return self._request_queue.submit(op, account_id, fn)
+
+    def queue_status(self) -> dict[str, Any]:
+        """返回请求队列状态快照（队列长度、累计处理数、工作线程存活等）。"""
+        return self._request_queue.stats()
 
     def connect(self) -> int:
         """连接模拟交易器，始终返回 0 表示成功。"""
@@ -391,8 +419,38 @@ class PaperQuantTrader:
         strategy_name: str = "",
         order_remark: str = "",
     ) -> int:
-        """同步下单，返回委托编号。"""
+        """同步下单，返回委托编号。
+
+        请求进入队列缓存，由工作线程串行执行（含行情价格拉取与撮合）。
+        """
         account_id = self._resolve_account_id(account)
+        return self.submit_qmt_op(
+            "order_stock",
+            account_id,
+            lambda: self._order_stock_impl(
+                account_id,
+                stock_code,
+                order_type,
+                order_volume,
+                price_type,
+                price,
+                strategy_name,
+                order_remark,
+            ),
+        )
+
+    def _order_stock_impl(
+        self,
+        account_id: str,
+        stock_code: str,
+        order_type: int,
+        order_volume: int,
+        price_type: int,
+        price: float,
+        strategy_name: str,
+        order_remark: str,
+    ) -> int:
+        """下单实现，仅由请求队列工作线程调用。"""
         state = self._get_account(account_id)
         config = self._get_config(account_id)
 
@@ -523,8 +581,16 @@ class PaperQuantTrader:
         return seq
 
     def cancel_order_stock(self, account: PaperAccount | Any, order_id: int) -> int:
-        """同步撤单，返回 0 表示成功，-1 表示失败。"""
+        """同步撤单，返回 0 表示成功，-1 表示失败。请求经队列串行执行。"""
         account_id = self._resolve_account_id(account)
+        return self.submit_qmt_op(
+            "cancel_order_stock",
+            account_id,
+            lambda: self._cancel_order_stock_impl(account_id, order_id),
+        )
+
+    def _cancel_order_stock_impl(self, account_id: str, order_id: int) -> int:
+        """撤单实现，仅由请求队列工作线程调用。"""
         state = self._accounts.get(account_id)
         if state is None:
             logger.warning("撤单失败: 账户 %s 不存在", account_id)
@@ -590,16 +656,21 @@ class PaperQuantTrader:
     def cancel_order_stock_sysid(
         self, account: PaperAccount | Any, market: Any, sysid: str
     ) -> int:
-        """按系统编号同步撤单。"""
+        """按系统编号同步撤单。请求经队列串行执行。"""
         account_id = self._resolve_account_id(account)
-        state = self._accounts.get(account_id)
-        if state is None:
+
+        def _impl() -> int:
+            state = self._accounts.get(account_id)
+            if state is None:
+                return -1
+            with state._lock:
+                for order in state.orders.values():
+                    if order.order_sysid == sysid:
+                        # 工作线程内嵌套调用，由重入保护内联执行
+                        return self.cancel_order_stock(account, order.order_id)
             return -1
-        with state._lock:
-            for order in state.orders.values():
-                if order.order_sysid == sysid:
-                    return self.cancel_order_stock(account, order.order_id)
-        return -1
+
+        return self.submit_qmt_op("cancel_order_stock_sysid", account_id, _impl)
 
     def cancel_order_stock_sysid_async(
         self, account: PaperAccount | Any, market: Any, sysid: str
@@ -615,11 +686,15 @@ class PaperQuantTrader:
 
     def query_stock_asset(self, account: PaperAccount | Any) -> XtAsset | None:
         account_id = self._resolve_account_id(account)
-        state = self._accounts.get(account_id)
-        if state is None:
-            return None
-        self._engine.update_position_prices(state)
-        return state.to_xt_asset()
+
+        def _impl() -> XtAsset | None:
+            state = self._accounts.get(account_id)
+            if state is None:
+                return None
+            self._engine.update_position_prices(state)
+            return state.to_xt_asset()
+
+        return self.submit_qmt_op("query_stock_asset", account_id, _impl)
 
     def query_stock_order(
         self, account: PaperAccount | Any, order_id: int
@@ -662,23 +737,31 @@ class PaperQuantTrader:
         self, account: PaperAccount | Any, stock_code: str
     ) -> XtPosition | None:
         account_id = self._resolve_account_id(account)
-        state = self._accounts.get(account_id)
-        if state is None:
-            return None
-        position = state.get_position(stock_code)
-        if position is None:
-            return None
-        self._engine.update_position_prices(state)
-        return position.to_xt_position()
+
+        def _impl() -> XtPosition | None:
+            state = self._accounts.get(account_id)
+            if state is None:
+                return None
+            position = state.get_position(stock_code)
+            if position is None:
+                return None
+            self._engine.update_position_prices(state)
+            return position.to_xt_position()
+
+        return self.submit_qmt_op("query_stock_position", account_id, _impl)
 
     def query_stock_positions(self, account: PaperAccount | Any) -> list[XtPosition]:
         account_id = self._resolve_account_id(account)
-        state = self._accounts.get(account_id)
-        if state is None:
-            return []
-        self._engine.update_position_prices(state)
-        with state._lock:
-            return [p.to_xt_position() for p in state.positions.values()]
+
+        def _impl() -> list[XtPosition]:
+            state = self._accounts.get(account_id)
+            if state is None:
+                return []
+            self._engine.update_position_prices(state)
+            with state._lock:
+                return [p.to_xt_position() for p in state.positions.values()]
+
+        return self.submit_qmt_op("query_stock_positions", account_id, _impl)
 
     # ------------------------------------------------------------------
     # 账户信息
@@ -1092,33 +1175,41 @@ class PaperQuantTrader:
     # ------------------------------------------------------------------
 
     def create_account(self, config: PaperAccountConfig) -> AccountState:
-        """创建或更新模拟账户。"""
-        self._config_manager.set_config(config)
-        state = self._config_manager.create_account_state(config)
-        with self._lock:
-            self._accounts[config.account_id] = state
-        self._update_summary(config.account_id)
-        logger.info(
-            "模拟账户已创建/更新: %s, initial_cash=%.2f, price_source=%s",
-            config.account_id,
-            config.initial_cash,
-            config.price_source,
-        )
-        return state
+        """创建或更新模拟账户。业绩摘要刷新经请求队列串行执行。"""
+
+        def _impl() -> AccountState:
+            self._config_manager.set_config(config)
+            state = self._config_manager.create_account_state(config)
+            with self._lock:
+                self._accounts[config.account_id] = state
+            self._update_summary(config.account_id)
+            logger.info(
+                "模拟账户已创建/更新: %s, initial_cash=%.2f, price_source=%s",
+                config.account_id,
+                config.initial_cash,
+                config.price_source,
+            )
+            return state
+
+        return self.submit_qmt_op("create_account", config.account_id, _impl)
 
     def reset_account(self, account_id: str) -> bool:
-        """重置指定账户。"""
-        config = self._config_manager.get_config(account_id)
-        if config is None:
-            logger.warning("重置失败: 模拟账户 %s 不存在", account_id)
-            return False
-        state = self._config_manager.create_account_state(config)
-        with self._lock:
-            self._accounts[account_id] = state
-        self._storage.remove_account_files(account_id)
-        self._update_summary(account_id)
-        logger.info("模拟账户已重置: %s", account_id)
-        return True
+        """重置指定账户。业绩摘要刷新经请求队列串行执行。"""
+
+        def _impl() -> bool:
+            config = self._config_manager.get_config(account_id)
+            if config is None:
+                logger.warning("重置失败: 模拟账户 %s 不存在", account_id)
+                return False
+            state = self._config_manager.create_account_state(config)
+            with self._lock:
+                self._accounts[account_id] = state
+            self._storage.remove_account_files(account_id)
+            self._update_summary(account_id)
+            logger.info("模拟账户已重置: %s", account_id)
+            return True
+
+        return self.submit_qmt_op("reset_account", account_id, _impl)
 
     def delete_account(self, account_id: str) -> bool:
         """删除指定账户及其数据。"""
@@ -1130,12 +1221,21 @@ class PaperQuantTrader:
         return True
 
     def get_summary(self, account_id: str) -> AccountSummary:
-        """获取账户业绩摘要。"""
-        self._update_summary(account_id)
-        return self._storage.read_summary(account_id)
+        """获取账户业绩摘要。价格刷新经请求队列串行执行。"""
+
+        def _impl() -> AccountSummary:
+            self._update_summary(account_id)
+            return self._storage.read_summary(account_id)
+
+        return self.submit_qmt_op("get_summary", account_id, _impl)
 
     def get_all_summaries(self) -> dict[str, AccountSummary]:
-        """获取所有账户业绩摘要。"""
-        with self._lock:
-            account_ids = list(self._accounts.keys())
-        return {aid: self.get_summary(aid) for aid in account_ids}
+        """获取所有账户业绩摘要。整体作为单个请求经队列串行执行。"""
+
+        def _impl() -> dict[str, AccountSummary]:
+            with self._lock:
+                account_ids = list(self._accounts.keys())
+            # 工作线程内嵌套调用 get_summary，由重入保护内联执行
+            return {aid: self.get_summary(aid) for aid in account_ids}
+
+        return self.submit_qmt_op("get_all_summaries", "", _impl)

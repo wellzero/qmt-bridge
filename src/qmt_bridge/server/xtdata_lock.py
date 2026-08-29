@@ -24,8 +24,16 @@ logger = logging.getLogger("qmt_bridge")
 # 全局异步锁，确保同一时刻只有一个请求/任务调用 xtdata
 xtdata_lock = asyncio.Lock()
 
-# /api/* 中无需串行化的前缀（不调用 xtdata 的端点，如通知接口）
-NO_LOCK_PREFIXES: tuple[str, ...] = ("/api/notify",)
+# /api/* 中无需串行化的前缀。
+# - /api/notify：不调用 xtdata 的端点
+# - /api/paper_trading、/api/paper_accounts：模拟交易端点，其 QMT 访问
+#   （get_full_tick 等）已由 PaperRequestQueue 单工作线程串行化，
+#   不参与全局锁可让多账户请求并发入队缓存，再逐个处理
+NO_LOCK_PREFIXES: tuple[str, ...] = (
+    "/api/notify",
+    "/api/paper_trading",
+    "/api/paper_accounts",
+)
 
 
 class XtdataSerializerMiddleware:

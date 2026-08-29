@@ -219,6 +219,19 @@ def paper_get_account_status(
     return {"data": _numpy_to_python(result)}
 
 
+@router.get("/paper_trading/queue_status")
+def paper_get_queue_status(
+    manager: PaperTraderManager = Depends(get_paper_trader_manager),
+):
+    """获取模拟交易请求队列状态。
+
+    所有账户的下单/撤单/行情拉取请求先缓存到该队列，
+    再由单一工作线程逐个串行执行。本端点用于监控队列积压情况。
+    """
+    result = manager.queue_status()
+    return {"data": _numpy_to_python(result)}
+
+
 @router.get("/paper_trading/account_infos")
 def paper_query_account_infos(
     manager: PaperTraderManager = Depends(get_paper_trader_manager),

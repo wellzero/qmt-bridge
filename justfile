@@ -130,6 +130,10 @@ update-paper-price-cache *ARGS:
 update-paper-close-price *ARGS:
     python scripts/update_paper_price_cache.py --close {{ARGS}}
 
+# 模拟交易请求队列冒烟测试（需先启动 qmt-server --paper-trading）
+smoke-paper-queue *ARGS:
+    python scripts/smoke_paper_queue.py {{ARGS}}
+
 # ─────────────────────────── 仪表盘 ─────────────────────────
 
 # 启动可视化仪表盘（http://localhost:8501）

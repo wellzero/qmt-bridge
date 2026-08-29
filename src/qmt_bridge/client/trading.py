@@ -242,6 +242,17 @@ class TradingMixin:
             "/api/paper_trading/account_status", {"account_id": account_id}
         )
 
+    def get_paper_queue_status(self) -> dict:
+        """获取模拟交易请求队列状态。
+
+        所有账户的下单/撤单/行情拉取请求先缓存到该队列，
+        再由单一工作线程逐个串行执行。
+
+        Returns:
+            包含 queue_size、processed、failed、peak_size、worker_alive 的字典
+        """
+        return self._get("/api/paper_trading/queue_status")
+
     def query_account_status_detail(self) -> dict:
         """查询账户状态详情。
 

@@ -141,6 +141,9 @@ class PaperTraderManager:
     ) -> dict[str, float]:
         """从 xtquant 下载指定股票的最新价，并更新账户的静态价格配置。
 
+        下载请求进入 PaperQuantTrader 请求队列，由工作线程串行执行，
+        避免与其他账户的行情拉取并发调用 xtquant。
+
         Args:
             account_id: 模拟账户 ID。
             stock_codes: 股票代码列表。
@@ -160,20 +163,23 @@ class PaperTraderManager:
 
         from .engine import StaticPriceSource
 
-        source = StaticPriceSource(config.static_prices)
-        downloaded = source.download_prices(stock_codes)
-        if downloaded:
-            config.static_prices = source.prices
-            self._trader._config_manager.set_config(config)
-            logger.info(
-                "账户 %s 已下载 %d 只静态价格: %s",
-                account_id,
-                len(downloaded),
-                ", ".join(downloaded.keys()),
-            )
-        else:
-            logger.warning("账户 %s 未下载到任何静态价格", account_id)
-        return downloaded
+        def _impl() -> dict[str, float]:
+            source = StaticPriceSource(config.static_prices)
+            downloaded = source.download_prices(stock_codes)
+            if downloaded:
+                config.static_prices = source.prices
+                self._trader._config_manager.set_config(config)
+                logger.info(
+                    "账户 %s 已下载 %d 只静态价格: %s",
+                    account_id,
+                    len(downloaded),
+                    ", ".join(downloaded.keys()),
+                )
+            else:
+                logger.warning("账户 %s 未下载到任何静态价格", account_id)
+            return downloaded
+
+        return self._trader.submit_qmt_op("download_prices", account_id, _impl)
 
     def get_summary(self, account_id: str = "") -> AccountSummary | None:
         if self._trader is None:
@@ -347,3 +353,9 @@ class PaperTraderManager:
         if self._trader is None:
             return []
         return self._trader.query_account_infos()
+
+    def queue_status(self) -> dict[str, Any]:
+        """获取模拟交易请求队列状态（队列长度、累计处理数、工作线程存活等）。"""
+        if self._trader is None:
+            return {"worker_alive": False, "queue_size": 0, "processed": 0}
+        return self._trader.queue_status()
