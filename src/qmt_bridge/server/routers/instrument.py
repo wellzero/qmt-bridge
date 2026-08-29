@@ -34,7 +34,13 @@ def get_instrument_detail_list(
     底层调用: xtdata.get_instrument_detail_list(stock_list, iscomplete=...)
     """
     stock_list = [s.strip() for s in stocks.split(",")]
-    raw = xtdata.get_instrument_detail_list(stock_list, iscomplete=iscomplete)
+    # bigqmt 兼容层没有批量版 get_instrument_detail_list（只有单代码
+    # get_instrument_detail，RPC 通道，休市也可用），逐代码聚合保持端点可用；
+    # 单代码版无 iscomplete 概念，忽略该参数。
+    if not hasattr(xtdata, "get_instrument_detail_list"):
+        raw = {code: xtdata.get_instrument_detail(code) for code in stock_list}
+    else:
+        raw = xtdata.get_instrument_detail_list(stock_list, iscomplete=iscomplete)
     return {"data": _numpy_to_python(raw)}
 
 

@@ -129,16 +129,24 @@ def get_connection_status():
         error: 连接异常时的错误信息（可选）。
 
     底层调用:
-        mini   → xtdata.get_client().get_connect_status()
+        mini   → xtdata.get_client() 状态方法（各版本不一：get_connect_status()
+                 或 is_connected()；都无则退回 get_instrument_detail 行情探测）
         bigqmt → 兼容层无 get_client（miniQMT 专有），改用 FormulaServer
                  白名单读探测（get_instrument_detail 命中即视为行情通道可用）
     """
     if hasattr(xtdata, "get_client"):
         try:
-            status = xtdata.get_client().get_connect_status()
-            return {"connected": status}
+            client = xtdata.get_client()
+            if hasattr(client, "get_connect_status"):
+                status = client.get_connect_status()
+            elif hasattr(client, "is_connected"):
+                # 本机 Lib\xtquant（手动拷贝版）只有 is_connected()
+                status = client.is_connected()
+            else:
+                status = bool(xtdata.get_instrument_detail("000001.SH"))
+            return {"connected": bool(status), "backend": "mini"}
         except Exception as e:
-            return {"connected": False, "error": str(e)}
+            return {"connected": False, "backend": "mini", "error": str(e)}
     try:
         probe = xtdata.get_instrument_detail("000001.SH")
         return {
