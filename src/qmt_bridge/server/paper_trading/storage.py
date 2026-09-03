@@ -39,6 +39,20 @@ ORDERS_HEADER = [
 ]
 
 
+def _order_row_key(row: dict[str, Any]) -> tuple[str, str, str]:
+    """委托行的跨会话唯一键。
+
+    ``order_id`` 是 per-process 计数器，服务重启后从 1 重新计数，
+    跨会话会撞号；辅以 ``order_time`` 与 ``stock_code`` 后，只有
+    "同秒同股同号"才会误判为同一笔委托（实际场景中不会发生）。
+    """
+    return (
+        str(row.get("order_id", "")),
+        str(row.get("order_time", "")),
+        str(row.get("stock_code", "")),
+    )
+
+
 @dataclass
 class AccountSummary:
     """单账户业绩摘要。"""
@@ -204,6 +218,42 @@ class PaperTradingStorage:
         except Exception:
             logger.exception("读取委托 CSV 失败: %s", path)
             return []
+
+    def read_all_orders(self, account_id: str) -> list[dict[str, Any]]:
+        """按日期序读取某账户全部委托 CSV 行，用于重启后回放恢复账户状态。
+
+        ``_persist_orders`` 每次会把进程内存中的全部委托重写进当日文件，
+        跨日进程的同一笔委托会在多个 ``orders_*.csv`` 中重复出现，因此按
+        ``(order_id, order_time, stock_code)`` 去重、保留最早文件中的行
+        （文件按日期名排序后先见者即首次写入，``trade_date`` 也以首次出现
+        为准）。
+
+        不能用 ``order_id`` 单键去重：它是 per-process 计数器，跨会话会撞号
+        （每次重启都从 1 附近重新计数），单键去重会误杀后一会话的委托；
+        加 ``stock_code`` 后跨会话误判需同秒同股同号，实际不可能发生。
+
+        每行附带 ``trade_date``（``YYYYMMDD``，取自文件名）字段。
+        """
+        orders_dir = self._account_dir(account_id) / "order"
+        if not orders_dir.exists():
+            return []
+        rows: list[dict[str, Any]] = []
+        seen: set[tuple[str, str, str]] = set()
+        try:
+            for path in sorted(orders_dir.glob("orders_*.csv")):
+                date_str = path.stem.removeprefix("orders_")
+                with open(path, newline="", encoding="utf-8") as f:
+                    for row in csv.DictReader(f):
+                        key = _order_row_key(row)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        row["trade_date"] = date_str
+                        rows.append(row)
+        except Exception:
+            logger.exception("读取全部委托 CSV 失败: %s", orders_dir)
+            return []
+        return rows
 
     def write_orders(
         self, account_id: str, orders: list[dict[str, Any]], date_str: str | None = None

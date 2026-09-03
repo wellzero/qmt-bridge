@@ -291,15 +291,29 @@ def calculate_live_pnl(
             "positions": pd.DataFrame(),
         }
 
-    # 可用资金取最近一条委托记录中的 account_cash
-    sorted_orders = orders_df.sort_values(
+    # 可用资金取最近一条已成交委托的 account_cash 快照。
+    # 不能用任意最后一条：废单/撤单行记录的是引擎当刻（可能已被重置清零的）
+    # 状态快照，曾把重置后的 initial_cash 当作可用资金，总资产凭空翻倍
+    filled_orders = orders_df[orders_df["traded_volume"].fillna(0) > 0].sort_values(
         by=["trade_date", "order_time"], na_position="first"
     )
-    last_cash = sorted_orders["account_cash"].dropna().iloc[-1]
-    cash = float(last_cash)
+    cash_series = (
+        pd.to_numeric(filled_orders["account_cash"], errors="coerce").dropna()
+        if "account_cash" in filled_orders.columns
+        else pd.Series(dtype=float)
+    )
+    if not cash_series.empty:
+        cash = float(cash_series.iloc[-1])
+        last_filled = filled_orders.loc[cash_series.index[-1]]
+    else:
+        cash = float(initial_cash)
+        last_filled = None
 
-    # 用最近一条委托的 account_market_value 作为持仓模型选择参考
-    reference_market_value = sorted_orders["account_market_value"].dropna().iloc[-1]
+    # 用最近一条已成交委托的 account_market_value 作为持仓模型选择参考
+    if last_filled is not None and pd.notna(last_filled.get("account_market_value")):
+        reference_market_value = float(last_filled["account_market_value"])
+    else:
+        reference_market_value = 0.0
 
     positions = derive_positions_with_cost(
         orders_df,

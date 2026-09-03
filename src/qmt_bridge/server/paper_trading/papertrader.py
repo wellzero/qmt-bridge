@@ -20,6 +20,8 @@ from .account import (
     ORDER_REPORTED_CANCEL,
     AccountState,
     OrderState,
+    PositionState,
+    TradeRecord,
 )
 from .callback import PaperTraderCallback
 from .config import PaperAccountConfig, PaperAccountConfigManager
@@ -39,7 +41,7 @@ from .models import (
     XtPosition,
     XtTrade,
 )
-from .storage import AccountSummary
+from .storage import AccountSummary, _order_row_key
 
 logger = logging.getLogger("qmt_bridge.paper_trading")
 
@@ -47,6 +49,14 @@ logger = logging.getLogger("qmt_bridge.paper_trading")
 # 委托类型常量
 STOCK_BUY = 23
 STOCK_SELL = 24
+
+
+def _to_float(value: Any) -> float:
+    """宽容地把 CSV 字段转为 float，无法解析时返回 0.0。"""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 class PaperAccount:
@@ -94,17 +104,158 @@ class PaperQuantTrader:
     # ------------------------------------------------------------------
 
     def _load_accounts(self) -> None:
-        """从配置管理器加载所有账户状态。"""
+        """从配置管理器加载所有账户状态，并回放历史委托恢复资金与持仓。"""
         loaded = 0
         for account_id in self._config_manager.list_accounts():
             config = self._config_manager.get_config(account_id)
             if config is not None and config.enabled:
-                self._accounts[account_id] = self._config_manager.create_account_state(
-                    config
-                )
+                state = self._config_manager.create_account_state(config)
+                self._restore_state_from_history(state, config)
+                self._accounts[account_id] = state
                 loaded += 1
         if loaded:
             logger.info("已从配置加载 %d 个模拟账户", loaded)
+
+    def _restore_state_from_history(
+        self, state: AccountState, config: PaperAccountConfig
+    ) -> None:
+        """回放历史委托 CSV，恢复账户资金、持仓与成交统计。
+
+        服务重启或账户重建（策略重注册）时，``create_account_state`` 只能给出
+        初始状态（资金=initial_cash、无持仓），隔夜持仓会丢、卖出全部废单。
+        本方法按时间序回放全部已成交委托（``traded_volume > 0``）重建真实状态。
+
+        引擎历史上有多次状态重置（每次重启资金回到 initial_cash），直接全量
+        回放会把被重置丢弃的旧持仓也算进来（幽灵持仓）。处理方式与仪表盘
+        ``_select_positions_by_cash`` 相同：每笔回放后与该行记录的
+        ``account_cash`` 快照核对（±1 元），不吻合说明该行之前发生过重置，
+        从该行起重开新段（资金=initial_cash、持仓清空）——最终保留最后一段。
+
+        资金/持仓公式与 ``MatchingEngine.match`` 完全一致（费用、成交价取 CSV
+        记录值不重算）；不重建 ``state.orders`` 与委托序号（``_persist_orders``
+        会把内存委托全量重写进当日 CSV，回填历史会造成跨文件重复）。
+        """
+        rows = self._storage.read_all_orders(state.account_id)
+        fills = []
+        for row in rows:
+            try:
+                volume = int(float(row.get("traded_volume") or 0))
+                price = float(row.get("traded_price") or 0)
+                order_type = int(float(row.get("order_type") or 0))
+                order_id = int(float(row.get("order_id") or 0))
+            except (TypeError, ValueError):
+                continue
+            if volume <= 0 or price <= 0 or order_type not in (STOCK_BUY, STOCK_SELL):
+                continue
+            try:
+                cash_snapshot = float(row.get("account_cash") or 0)
+            except (TypeError, ValueError):
+                cash_snapshot = None  # 旧数据缺快照，跳过一致性核对
+            fills.append(
+                {
+                    "row": row,
+                    "order_id": order_id,
+                    "order_type": order_type,
+                    "volume": volume,
+                    "price": price,
+                    "commission": _to_float(row.get("commission")),
+                    "stamp_tax": _to_float(row.get("stamp_tax")),
+                    "cash_snapshot": cash_snapshot,
+                }
+            )
+        if not fills:
+            return
+
+        initial_cash = float(config.initial_cash)
+        tolerance = 1.0
+
+        cash = initial_cash
+        positions: dict[str, PositionState] = {}
+        trades: list[TradeRecord] = []
+        resets = 0
+
+        def _flow(f: dict, base: float) -> float:
+            """按方向计算应用委托 f 后的资金（自 base 出发）。"""
+            amount = round(f["price"] * f["volume"], 4)
+            if f["order_type"] == STOCK_BUY:
+                return base - amount - f["commission"] - f["stamp_tax"]
+            return base + amount - f["commission"] - f["stamp_tax"]
+
+        for f in fills:
+            expected = _flow(f, cash)
+            snapshot = f["cash_snapshot"]
+            if snapshot is not None and abs(expected - snapshot) > tolerance:
+                # 与快照不吻合：该行之前引擎状态被重置过，重开新段再应用
+                cash = initial_cash
+                positions = {}
+                trades = []
+                resets += 1
+                expected = _flow(f, cash)
+            cash = expected
+
+            stock = str(f["row"].get("stock_code", ""))
+            amount = round(f["price"] * f["volume"], 4)
+            if f["order_type"] == STOCK_BUY:
+                position = positions.setdefault(
+                    stock,
+                    PositionState(account_id=state.account_id, stock_code=stock),
+                )
+                total_cost = position.avg_price * position.volume + amount
+                position.volume += f["volume"]
+                position.can_use_volume += f["volume"]
+                position.avg_price = (
+                    round(total_cost / position.volume, 4)
+                    if position.volume > 0
+                    else 0.0
+                )
+                position.last_price = f["price"]
+                realized_pnl = 0.0
+            else:
+                position = positions.get(stock)
+                old_avg = position.avg_price if position else 0.0
+                if position is not None:
+                    # 卖量超出回放持仓时钳制到 0（不一致段会被快照核对丢弃）
+                    position.can_use_volume = max(
+                        0, position.can_use_volume - f["volume"]
+                    )
+                    position.volume = max(0, position.volume - f["volume"])
+                    if position.volume == 0:
+                        positions.pop(stock, None)
+                realized_pnl = (
+                    amount - f["volume"] * old_avg - f["commission"] - f["stamp_tax"]
+                )
+
+            trades.append(
+                TradeRecord(
+                    account_id=state.account_id,
+                    stock_code=stock,
+                    order_id=f["order_id"],
+                    order_type=f["order_type"],
+                    traded_id=f["order_id"],
+                    traded_time=str(f["row"].get("order_time", "")),
+                    traded_price=f["price"],
+                    traded_volume=f["volume"],
+                    traded_amount=amount,
+                    commission=f["commission"],
+                    stamp_tax=f["stamp_tax"],
+                    realized_pnl=realized_pnl,
+                    strategy_name=str(f["row"].get("strategy_name", "")),
+                    order_remark=str(f["row"].get("order_remark", "")),
+                )
+            )
+
+        with state._lock:
+            state.cash = round(cash, 4)
+            state.positions = positions
+            state.trades = trades
+        logger.info(
+            "账户 %s 已从历史委托恢复: cash=%.2f 持仓=%d 成交=%d 重置截断=%d",
+            state.account_id,
+            cash,
+            len(positions),
+            len(trades),
+            resets,
+        )
 
     def _sync_accounts_from_storage(self) -> None:
         """扫描数据目录，为有业绩文件但配置缺失的账户自动重建配置。
@@ -135,9 +286,9 @@ class PaperQuantTrader:
                     initial_cash=summary.initial_cash,
                 )
                 self._config_manager.set_config(config)
-                self._accounts[account_id] = self._config_manager.create_account_state(
-                    config
-                )
+                state = self._config_manager.create_account_state(config)
+                self._restore_state_from_history(state, config)
+                self._accounts[account_id] = state
                 self._update_summary(account_id)
                 synced += 1
                 logger.info("从磁盘自动恢复模拟账户配置: %s", account_id)
@@ -159,9 +310,10 @@ class PaperQuantTrader:
                 if config is None:
                     config = PaperAccountConfig(account_id=account_id)
                     self._config_manager.set_config(config)
-                self._accounts[account_id] = self._config_manager.create_account_state(
-                    config
-                )
+                state = self._config_manager.create_account_state(config)
+                # 自动建户也可能命中"配置缺失但历史委托仍在"的场景，一并回放
+                self._restore_state_from_history(state, config)
+                self._accounts[account_id] = state
             return self._accounts[account_id]
 
     def _get_config(self, account_id: str) -> PaperAccountConfig:
@@ -233,11 +385,18 @@ class PaperQuantTrader:
             return False
 
     def _persist_orders(self, account_id: str) -> None:
-        """将当前账户委托列表持久化到 CSV。"""
+        """将当前账户委托列表持久化到 CSV。
+
+        服务重启或账户重建后 ``state.orders`` 只含新会话的委托，
+        盲目整文件重写会抹掉当日早前会话的委托行——回放恢复依赖这些行，
+        因此先读回当日文件、按 ``_order_row_key`` 合并保留早前会话的行，
+        再覆盖写入。
+        """
         state = self._accounts.get(account_id)
         if state is None:
             return
         rows = []
+        current_keys: set[tuple[str, str]] = set()
         with state._lock:
             for order in state.orders.values():
                 xt = order.to_xt_order()
@@ -262,6 +421,16 @@ class PaperQuantTrader:
                         "order_remark": xt.order_remark,
                     }
                 )
+                current_keys.add(_order_row_key(rows[-1]))
+
+        if not rows:
+            return
+
+        existing = self._storage.read_orders(account_id)
+        preserved = [r for r in existing if _order_row_key(r) not in current_keys]
+        if preserved:
+            rows = preserved + rows
+
         self._storage.write_orders(account_id, rows)
 
     def _update_summary(self, account_id: str) -> None:
@@ -1175,11 +1344,16 @@ class PaperQuantTrader:
     # ------------------------------------------------------------------
 
     def create_account(self, config: PaperAccountConfig) -> AccountState:
-        """创建或更新模拟账户。业绩摘要刷新经请求队列串行执行。"""
+        """创建或更新模拟账户。业绩摘要刷新经请求队列串行执行。
+
+        已有历史委托的账户（策略每次启动都会重注册）回放恢复资金与持仓，
+        避免更新配置时把内存状态清零；新账户无历史则保持初始状态。
+        """
 
         def _impl() -> AccountState:
             self._config_manager.set_config(config)
             state = self._config_manager.create_account_state(config)
+            self._restore_state_from_history(state, config)
             with self._lock:
                 self._accounts[config.account_id] = state
             self._update_summary(config.account_id)

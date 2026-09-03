@@ -295,8 +295,14 @@ def load_all_orders(data_dir: Path, account_id: str) -> pd.DataFrame:
         return pd.DataFrame()
     combined = pd.concat(frames, ignore_index=True)
 
-    if "order_id" in combined.columns:
-        # 保留首次出现，确保 trade_date 取最早的文件名日期
+    if {"order_id", "order_time", "stock_code"}.issubset(combined.columns):
+        # 跨日进程重写造成的重复委托：按 (order_id, order_time, stock_code)
+        # 去重、保留首次出现，确保 trade_date 取最早的文件名日期。order_id 是
+        # per-process 计数器、跨会话会撞号，不能单键去重（会误杀后一会话的委托）
+        combined = combined.drop_duplicates(
+            subset=["order_id", "order_time", "stock_code"], keep="first"
+        )
+    elif "order_id" in combined.columns:
         combined = combined.drop_duplicates(subset=["order_id"], keep="first")
 
     return combined.reset_index(drop=True)
