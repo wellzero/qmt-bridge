@@ -57,3 +57,6 @@ htmlcov/
 
 # Documentation build output
 site/
+
+# Generated chart output
+output/

@@ -15,6 +15,7 @@ import json
 import logging
 from datetime import datetime, time
 from pathlib import Path
+from time import sleep
 from typing import Any
 
 import pandas as pd
@@ -111,6 +112,25 @@ def save_price_cache(
     return path
 
 
+def _server_headers(api_key: str) -> dict[str, str]:
+    """构建访问 qmt-server 的请求头。"""
+    headers = {"Accept": "application/json"}
+    if api_key:
+        headers["X-API-Key"] = api_key
+    return headers
+
+
+def _no_proxy_opener():
+    """构建禁用系统代理的 URL opener。
+
+    局域网请求禁用系统代理：进程若继承 http_proxy 且 no_proxy 通配符
+    （如 ``*.zicp.fun``）不被 urllib 识别，请求会被转发到代理并超时。
+    """
+    import urllib.request
+
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
 def fetch_prices_from_server(
     host: str, port: int, api_key: str, stock_codes: list[str]
 ) -> dict[str, float]:
@@ -128,13 +148,8 @@ def fetch_prices_from_server(
     stocks_param = ",".join(stock_codes)
     encoded = urllib.request.quote(stocks_param)
     url = f"http://{host}:{port}/api/market/full_tick?stocks={encoded}"
-    headers = {"Accept": "application/json"}
-    if api_key:
-        headers["X-API-Key"] = api_key
-
-    # 局域网请求禁用系统代理：进程若继承 http_proxy 且 no_proxy 通配符
-    # （如 ``*.zicp.fun``）不被 urllib 识别，请求会被转发到代理并超时
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    headers = _server_headers(api_key)
+    opener = _no_proxy_opener()
 
     data = None
     last_exc: Exception | None = None
@@ -174,6 +189,279 @@ def fetch_prices_from_server(
                 break
 
     return prices
+
+
+# ── 每日收盘价（用于无委托日的持仓重估）────────────────────────────
+
+
+def fetch_daily_closes(
+    host: str,
+    port: int,
+    api_key: str,
+    stock_codes: list[str],
+    start_time: str,
+    end_time: str,
+) -> dict[str, dict[str, float]]:
+    """通过 qmt-server 的 ``/api/market/market_data_ex`` 拉取日收盘价。
+
+    Args:
+        stock_codes: 股票代码列表（内部按 50 只一批，规避 URL 长度限制）。
+        start_time / end_time: ``YYYYMMDD``。
+
+    Returns:
+        ``{股票代码: {YYYYMMDD: close}}``；窗口内无数据的代码不出现在结果中。
+    """
+    import urllib.error
+    import urllib.request
+
+    closes: dict[str, dict[str, float]] = {}
+    for i in range(0, len(stock_codes), 50):
+        batch = stock_codes[i : i + 50]
+        stocks_param = urllib.request.quote(",".join(batch))
+        url = (
+            f"http://{host}:{port}/api/market/market_data_ex"
+            f"?stocks={stocks_param}&period=1d&fields=close"
+            f"&start_time={start_time}&end_time={end_time}"
+        )
+        req = urllib.request.Request(
+            url, headers=_server_headers(api_key), method="GET"
+        )
+        try:
+            with _no_proxy_opener().open(req, timeout=60) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            error_body = exc.read().decode("utf-8", errors="ignore")
+            logger.error("拉取日收盘价 HTTP 错误 %s: %s", exc.code, error_body)
+            raise RuntimeError(f"拉取日收盘价失败: HTTP {exc.code}") from exc
+        bars = data.get("data", {}) if isinstance(data, dict) else {}
+        for code, rows in bars.items():
+            for row in rows or []:
+                date = str(row.get("index", ""))
+                close = row.get("close")
+                if len(date) == 8 and isinstance(close, (int, float)) and close > 0:
+                    closes.setdefault(code, {})[date] = float(close)
+    return closes
+
+
+def request_history_download(
+    host: str,
+    port: int,
+    api_key: str,
+    stock_codes: list[str],
+    start_time: str,
+    end_time: str,
+    batch_size: int = 10,
+) -> None:
+    """触发 qmt-server 批量下载缺失的日 K 历史。
+
+    下载接口对股票列表逐只串行执行、请求阻塞到整批完成，一次性发送
+    全部代码会长时间阻塞甚至超时，因此分小批发送（每批等待完成）；
+    单批超时重试一次——下载是幂等的增量操作，重复触发无副作用。
+    """
+    import urllib.error
+    import urllib.request
+
+    for i in range(0, len(stock_codes), batch_size):
+        batch = stock_codes[i : i + batch_size]
+        body = json.dumps(
+            {
+                "stock_list": batch,
+                "period": "1d",
+                "start_time": start_time,
+                "end_time": end_time,
+            }
+        ).encode("utf-8")
+        for attempt in range(2):
+            req = urllib.request.Request(
+                f"http://{host}:{port}/api/download/history_data2",
+                data=body,
+                headers={
+                    **_server_headers(api_key),
+                    "Content-Type": "application/json",
+                },
+                method="POST",
+            )
+            try:
+                with _no_proxy_opener().open(req, timeout=300) as resp:
+                    json.loads(resp.read().decode("utf-8"))
+                break
+            except urllib.error.HTTPError as exc:
+                error_body = exc.read().decode("utf-8", errors="ignore")
+                logger.error("触发日 K 下载 HTTP 错误 %s: %s", exc.code, error_body)
+                raise RuntimeError(f"触发日 K 下载失败: HTTP {exc.code}") from exc
+            except Exception as exc:
+                if attempt == 0:
+                    logger.warning(
+                        "日 K 下载批次超时（%d 只，%s~%s），重试: %s",
+                        len(batch),
+                        batch[0],
+                        batch[-1],
+                        exc,
+                    )
+                else:
+                    # 放弃该批：缺的代码由 ensure_daily_closes 的轮询兜底上报
+                    logger.warning("日 K 下载批次放弃（%d 只）: %s", len(batch), exc)
+
+
+def ensure_daily_closes(
+    host: str,
+    port: int,
+    api_key: str,
+    stock_codes: list[str],
+    start_time: str,
+    end_time: str,
+    wait_secs: int = 240,
+) -> tuple[dict[str, dict[str, float]], list[str]]:
+    """确保日收盘价可用：触发下载后轮询读取，直至覆盖或超时。
+
+    首轮下载后个别代码可能静默失败（下载返回 ok 但无数据），
+    因此停滞时对缺失子集再补 1 轮下载重试。
+
+    Returns:
+        ``(closes, missing)``，missing 为重试后仍无任何有效收盘价的代码。
+        个别代码长期无数据属正常（退市、ETF 行情缺失等），不阻塞整体。
+    """
+    if not stock_codes:
+        return {}, []
+
+    closes: dict[str, dict[str, float]] = {}
+    pending = list(stock_codes)
+    for round_no in range(2):  # 首轮 + 1 轮对缺失子集的补下载
+        request_history_download(host, port, api_key, pending, start_time, end_time)
+        deadline = datetime.now().timestamp() + wait_secs
+        missing_prev, stall = -1, 0
+        while True:
+            sleep(5)
+            try:
+                round_closes = fetch_daily_closes(
+                    host, port, api_key, pending, start_time, end_time
+                )
+            except Exception:
+                logger.exception("拉取日收盘价失败，5 秒后重试")
+                continue
+            closes.update(round_closes)
+            pending = [c for c in stock_codes if c not in closes]
+            if not pending:
+                return closes, []
+            if len(pending) == missing_prev:
+                stall += 1
+                if stall >= 3:  # 连续 3 轮无进展，跳出本轮
+                    break
+            else:
+                stall = 0
+            missing_prev = len(pending)
+            if datetime.now().timestamp() >= deadline:
+                logger.warning("日收盘价下载超时，%d 个代码无数据", len(pending))
+                break
+        if round_no == 0 and pending:
+            logger.info(
+                "日收盘价首轮停滞，补下载 %d 个缺失代码: %s", len(pending), pending[:10]
+            )
+    if pending:
+        logger.warning("日收盘价最终缺失 %d 个代码: %s", len(pending), pending[:10])
+    return closes, pending
+
+
+def load_daily_close_cache(data_dir: Path) -> dict[str, Any]:
+    """加载日收盘价缓存 ``prices/daily_closes.json`` 的原始内容。"""
+    path = _prices_dir(data_dir) / "daily_closes.json"
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        logger.exception("读取日收盘价缓存失败: %s", path)
+        return {}
+
+
+def save_daily_close_cache(
+    data_dir: Path,
+    closes: dict[str, dict[str, float]],
+    start_time: str,
+    end_time: str,
+) -> Path:
+    """保存日收盘价缓存到 ``prices/daily_closes.json``。"""
+    prices_dir = _prices_dir(data_dir)
+    prices_dir.mkdir(parents=True, exist_ok=True)
+    path = prices_dir / "daily_closes.json"
+    payload = {
+        "timestamp": datetime.now().isoformat(),
+        "start_time": start_time,
+        "end_time": end_time,
+        "closes": closes,
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    logger.info("已保存 %d 个代码的日收盘价到 %s", len(closes), path)
+    return path
+
+
+def revalue_asset_history_tail(
+    wide_df: pd.DataFrame,
+    holdings: dict[str, dict[str, Any]],
+    closes: dict[str, dict[str, float]],
+) -> pd.DataFrame:
+    """按 持仓 × 日收盘价 重估无委托日的期末总资产。
+
+    委托日的值来自引擎快照（精确，含费用），仅重估每个账户最后一笔
+    委托之后的交易日：``现金 + Σ 持仓量 × 当日价格``。无任何收盘价的
+    持仓（如部分 ETF 行情缺失）按最近成交价冻结，与账户详情实时盈亏
+    的兜底口径一致；某日其余持仓也缺价时沿用前值，避免总资产被低估。
+
+    Args:
+        wide_df: :func:`load_asset_history` 返回的快照宽表（已前向填充）。
+        holdings: ``{account_id: {"cash", "volumes": {code: 量},
+        "prices": {code: 最近成交价}, "last_order_date"}}``。
+        closes: ``{股票代码: {YYYYMMDD: close}}``。
+
+    Returns:
+        重估后的宽表副本；``closes`` 为空时原样返回。
+    """
+    if wide_df.empty or not closes:
+        return wide_df
+
+    dates = wide_df.index
+    revalued = wide_df.copy()
+    for aid, holding in holdings.items():
+        if aid not in revalued.columns:
+            continue
+        volumes: dict[str, Any] = holding.get("volumes") or {}
+        if not volumes:
+            continue
+        last_order_date = str(holding.get("last_order_date", ""))
+        tail_mask = dates > last_order_date  # YYYYMMDD 字典序即时间序
+        if not tail_mask.any():
+            continue
+
+        fallback_prices: dict[str, Any] = holding.get("prices") or {}
+        cash = float(holding.get("cash") or 0.0)
+        total = pd.Series(0.0, index=dates)
+        valid = pd.Series(True, index=dates)
+        for code, volume in volumes.items():
+            series = closes.get(code)
+            if series:
+                close_s = (
+                    pd.Series(series)
+                    .pipe(lambda s: s[~s.index.duplicated(keep="last")])
+                    .sort_index()
+                    .reindex(dates)
+                    .ffill()  # 停牌/缺数日沿用最近收盘价
+                )
+            else:
+                # 无收盘价序列的持仓（如部分 ETF）：按最近成交价冻结
+                price = fallback_prices.get(code)
+                close_s = pd.Series(
+                    float(price)
+                    if isinstance(price, (int, float)) and price > 0
+                    else float("nan"),
+                    index=dates,
+                )
+            total = total + close_s.fillna(0.0) * float(volume)
+            valid = valid & close_s.notna()
+
+        mask = tail_mask & valid
+        revalued[aid] = revalued[aid].where(~mask, cash + total)
+    return revalued
 
 
 def is_trading_hours(now: datetime | None = None) -> bool:

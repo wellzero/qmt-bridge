@@ -308,6 +308,167 @@ def load_all_orders(data_dir: Path, account_id: str) -> pd.DataFrame:
     return combined.reset_index(drop=True)
 
 
+def _initial_cash(data_dir: Path, config: dict[str, Any], account_id: str) -> float:
+    """账户初始资金：``config.json`` -> ``summary.json`` -> 默认 10 万。"""
+    value = config.get(account_id, {}).get("initial_cash")
+    if not value:
+        value = load_summary(data_dir, account_id).get("initial_cash")
+    return float(value) if value else 100_000.0
+
+
+def eod_total_asset_series(orders_df: pd.DataFrame) -> pd.Series:
+    """从委托记录提取每个交易日的期末总资产序列。
+
+    每个交易日取最后一笔成交委托（``traded_volume > 0``，当日无成交则取
+    最后一行）的 ``account_cash + account_market_value`` 作为当日期末总资产。
+    行序按 ``(trade_date, order_time)`` 稳定排序，与文件内追加顺序一致。
+
+    Returns:
+        以交易日（YYYYMMDD 字符串）为索引的升序总资产 Series；
+        无有效数据时为空 Series。
+    """
+    required = {"trade_date", "traded_volume", "account_cash", "account_market_value"}
+    if orders_df.empty or not required.issubset(orders_df.columns):
+        return pd.Series(dtype=float)
+
+    df = orders_df.copy()
+    df["_asset"] = pd.to_numeric(df["account_cash"], errors="coerce").fillna(
+        0
+    ) + pd.to_numeric(df["account_market_value"], errors="coerce").fillna(0)
+    # 缺资金字段的脏行资产为 0，直接剔除
+    df = df[df["_asset"] > 0]
+    if df.empty:
+        return pd.Series(dtype=float)
+
+    df = df.sort_values(["trade_date", "order_time"], kind="stable")
+    filled = df[pd.to_numeric(df["traded_volume"], errors="coerce").fillna(0) > 0]
+    last_filled = filled.groupby("trade_date")["_asset"].last()
+    last_any = df.groupby("trade_date")["_asset"].last()
+    # 当日无成交时退化为最后一行委托的资产快照
+    eod = last_filled.reindex(last_any.index).fillna(last_any)
+    return eod.sort_index()
+
+
+def load_asset_history(
+    data_dir: Path,
+) -> tuple[pd.DataFrame, dict[str, float], pd.DataFrame, dict[str, dict[str, Any]]]:
+    """构建全部账户 × 全部交易日的期末总资产宽表。
+
+    各账户先用 :func:`eod_total_asset_series` 得到日末总资产，再对齐到
+    全体交易日轴：无委托日沿用前值（可再用收盘价重估，见
+    ``pricing.revalue_asset_history_tail``），账户首个交易日前按初始资金
+    补齐。初始资金取 ``config.json``，回退 ``summary.json``，最终回退 10 万。
+
+    Returns:
+        ``(wide_df, initial_map, stats_df, holdings)``：
+
+        - ``wide_df``：索引为升序交易日（YYYYMMDD），列为有委托记录的账户；
+        - ``initial_map``：全部账户（含未交易）的初始资金；
+        - ``stats_df``：全部账户的成交笔数与首末交易日期，索引为账户 ID；
+        - ``holdings``：各账户当前现金、持仓量与最后委托日期，供无委托日
+          按收盘价重估（口径与账户详情实时盈亏一致，含状态重置识别）。
+    """
+    config = load_config(data_dir)
+    account_ids = list_account_ids(data_dir)
+
+    eod_map: dict[str, pd.Series] = {}
+    stats: dict[str, dict[str, Any]] = {}
+    holdings: dict[str, dict[str, Any]] = {}
+    initial_map: dict[str, float] = {}
+    for account_id in account_ids:
+        orders = load_all_orders(data_dir, account_id)
+        initial = _initial_cash(data_dir, config, account_id)
+        initial_map[account_id] = initial
+
+        series = eod_total_asset_series(orders)
+        if not series.empty:
+            eod_map[account_id] = series
+        if orders.empty or "traded_volume" not in orders.columns:
+            n_filled, first_date, last_date = 0, "", ""
+        else:
+            filled_dates = orders.loc[
+                pd.to_numeric(orders["traded_volume"], errors="coerce").fillna(0) > 0,
+                "trade_date",
+            ]
+            n_filled = int(len(filled_dates))
+            first_date = str(filled_dates.min()) if n_filled else ""
+            last_date = str(filled_dates.max()) if n_filled else ""
+        stats[account_id] = {
+            "n_filled": n_filled,
+            "first_date": first_date,
+            "last_date": last_date,
+        }
+        holdings[account_id] = _current_holdings(orders, initial)
+
+    stats_df = pd.DataFrame.from_dict(stats, orient="index")
+    stats_df.index.name = "account_id"
+
+    if not eod_map:
+        return pd.DataFrame(dtype=float), initial_map, stats_df, holdings
+
+    dates = sorted(set().union(*(set(s.index) for s in eod_map.values())))
+    wide = pd.DataFrame(
+        {aid: s.reindex(dates) for aid, s in eod_map.items()}, index=dates
+    )
+    # 无委托日沿用前值；首个交易日前账户尚未开仓，按初始资金补齐
+    wide = wide.ffill().fillna({aid: initial_map[aid] for aid in wide.columns})
+    wide.index.name = "trade_date"
+    return wide, initial_map, stats_df, holdings
+
+
+def _current_holdings(orders_df: pd.DataFrame, initial_cash: float) -> dict[str, Any]:
+    """从委托记录推导账户当前现金、持仓量与最近成交价。
+
+    现金取最后一笔已成交委托的 ``account_cash`` 快照（废单快照可能反映
+    重置后的清零状态，不可用）；持仓用 :func:`derive_positions_with_cost`
+    的重置识别逻辑，与账户详情实时盈亏同口径。``prices`` 供无收盘价
+    持仓（如部分 ETF 行情缺失）重估时按最近成交价冻结兜底。
+    """
+    empty = {
+        "cash": float(initial_cash),
+        "volumes": {},
+        "prices": {},
+        "last_order_date": "",
+    }
+    if orders_df.empty or "traded_volume" not in orders_df.columns:
+        return empty
+
+    filled = orders_df[
+        pd.to_numeric(orders_df["traded_volume"], errors="coerce").fillna(0) > 0
+    ].sort_values(["trade_date", "order_time"], kind="stable")
+    if filled.empty:
+        return {**empty, "last_order_date": str(orders_df["trade_date"].max())}
+
+    cash_series = (
+        pd.to_numeric(filled["account_cash"], errors="coerce").dropna()
+        if "account_cash" in filled.columns
+        else pd.Series(dtype=float)
+    )
+    cash = float(cash_series.iloc[-1]) if not cash_series.empty else float(initial_cash)
+    last_filled = filled.loc[cash_series.index[-1]] if not cash_series.empty else None
+    reference_mv = 0.0
+    if last_filled is not None and pd.notna(last_filled.get("account_market_value")):
+        reference_mv = float(last_filled["account_market_value"])
+
+    positions = derive_positions_with_cost(
+        orders_df, initial_cash=initial_cash, reference_market_value=reference_mv
+    )
+    volumes: dict[str, float] = {}
+    prices: dict[str, float] = {}
+    if not positions.empty:
+        for row in positions.itertuples():
+            volumes[str(row.stock_code)] = float(row.volume)
+            traded_price = float(getattr(row, "traded_price", 0.0) or 0.0)
+            if traded_price > 0:
+                prices[str(row.stock_code)] = traded_price
+    return {
+        "cash": cash,
+        "volumes": volumes,
+        "prices": prices,
+        "last_order_date": str(orders_df["trade_date"].max()),
+    }
+
+
 def derive_positions(orders_df: pd.DataFrame) -> pd.DataFrame:
     """根据委托记录推导当前持仓（仅用于展示，可能与实际持仓有偏差）。"""
     if orders_df.empty or "stock_code" not in orders_df.columns:

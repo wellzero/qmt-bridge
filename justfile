@@ -130,6 +130,10 @@ update-paper-price-cache *ARGS:
 update-paper-close-price *ARGS:
     python scripts/update_paper_price_cache.py --close {{ARGS}}
 
+# 绘制模拟盘各账户全交易日总资产走势（自包含 HTML 小倍数图）
+plot-paper-assets *ARGS:
+    python scripts/plot_paper_assets.py {{ARGS}}
+
 # 模拟交易请求队列冒烟测试（需先启动 qmt-server --paper-trading）
 smoke-paper-queue *ARGS:
     python scripts/smoke_paper_queue.py {{ARGS}}
