@@ -17,7 +17,7 @@
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 # bigqmt 后端可选 RPC 通道（与上游 transports/factory.KNOWN_TRANSPORTS 对齐）：
@@ -25,7 +25,23 @@ from pathlib import Path
 BIGQMT_RPC_TRANSPORTS = ("redis", "zmq", "mysql", "shm")
 
 
-def _load_env_file(env_path: Path | None = None) -> None:
+@dataclass
+class EnvFileLoad:
+    """``_load_env_file`` 的加载结果，供启动时打印配置来源信息。
+
+    Attributes:
+        path: 实际加载的 .env 文件路径；未找到文件时为 None。
+        loaded: 本次从 .env 新写入 os.environ 的键（按文件出现顺序）。
+        skipped: .env 中因系统环境变量已存在而被跳过的键
+            （重复调用时先前载入的键也会出现在这里）。
+    """
+
+    path: Path | None = None
+    loaded: list[str] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
+
+
+def _load_env_file(env_path: Path | None = None) -> EnvFileLoad:
     """从 .env 文件加载键值对到 os.environ 中。
 
     使用纯标准库实现，不依赖 python-dotenv 第三方包。
@@ -34,12 +50,16 @@ def _load_env_file(env_path: Path | None = None) -> None:
 
     Args:
         env_path: .env 文件路径。若为 None，则在当前工作目录下查找 .env 文件。
+
+    Returns:
+        EnvFileLoad 加载结果（路径 + 新载入/跳过的键列表），供调用方打印。
     """
     if env_path is None:
         # 默认在当前工作目录下查找 .env 文件
         env_path = Path.cwd() / ".env"
     if not env_path.is_file():
-        return
+        return EnvFileLoad(path=None)
+    result = EnvFileLoad(path=env_path)
     with open(env_path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -52,6 +72,10 @@ def _load_env_file(env_path: Path | None = None) -> None:
                 # 系统环境变量优先：已存在的变量不覆盖
                 if key and key not in os.environ:
                     os.environ[key] = val
+                    result.loaded.append(key)
+                elif key:
+                    result.skipped.append(key)
+    return result
 
 
 @dataclass

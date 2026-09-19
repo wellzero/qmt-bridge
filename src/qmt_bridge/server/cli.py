@@ -16,7 +16,33 @@ BSON 断言崩溃。
 import argparse
 import os
 
-from .config import Settings, _load_env_file, reset_settings
+from .config import EnvFileLoad, Settings, _load_env_file, reset_settings
+
+# 值需要脱敏的配置键（子串匹配、大小写不敏感）
+_SENSITIVE_KEY_MARKERS = ("API_KEY", "SECRET", "PASSWORD", "TOKEN")
+
+
+def _print_env_load_info(load: EnvFileLoad) -> None:
+    """启动时打印 .env 加载信息（路径 + 各键取值，敏感值脱敏）。
+
+    打印的是 _load_env_file() 实际生效后的 os.environ 取值，
+    因此系统环境变量覆盖 .env 的结果也如实呈现。
+    在 CLI 入口调用（此时应用 logger 尚未配置），直接输出到 stdout。
+    """
+    if load.path is None:
+        print(f"[.env] 未找到（工作目录 {os.getcwd()}），使用系统环境变量/默认值")
+        return
+    print(f"[.env] 已加载 {len(load.loaded)} 项: {load.path}")
+    for key in load.loaded:
+        val = os.environ.get(key, "")
+        if any(m in key.upper() for m in _SENSITIVE_KEY_MARKERS):
+            val = "****（已脱敏）"
+        print(f"[.env]   {key}={val}")
+    if load.skipped:
+        print(
+            f"[.env] {len(load.skipped)} 项因系统环境变量已存在而跳过 "
+            f"(值以系统环境变量为准): {', '.join(load.skipped)}"
+        )
 
 
 def main():
@@ -43,7 +69,7 @@ def main():
                                  见 docs/big-qmt.md）
     """
     # 优先从 .env 文件加载环境变量，使得后续参数默认值可以读取到 .env 中的配置
-    _load_env_file()
+    _print_env_load_info(_load_env_file())
 
     parser = argparse.ArgumentParser(
         prog="qmt-server",
@@ -179,7 +205,7 @@ def scheduler_main():
         qmt-scheduler                    # 使用 .env 默认配置
         qmt-scheduler --log-level debug  # 调试模式
     """
-    _load_env_file()
+    _print_env_load_info(_load_env_file())
 
     # bigqmt 模式下调度器的行情导入同样经 xtdata_source 解析
     # （scheduler.py 顶层 `from .xtdata_source import xtdata`，按
