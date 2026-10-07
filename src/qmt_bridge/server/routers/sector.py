@@ -13,6 +13,8 @@
 - xtdata.reset_sector()                 — 重置板块成分股（替换全部）
 """
 
+import inspect
+
 from fastapi import APIRouter, Query
 from ..xtdata_source import xtdata
 
@@ -34,11 +36,25 @@ def get_sector_list():
 
     Returns:
         sectors: 所有板块名称的字符串列表。
+        source: 板块列表来源 — "terminal"（终端真实板块，mini 后端）或
+                "fallback"（知名板块降级名单，bigqmt 后端）。
 
     底层调用: xtdata.get_sector_list()
+
+    bigqmt 后端下完整版 QMT 终端内无法枚举真实板块（原生 xtdata 的行情
+    服务在 Big QMT 沙箱里不可达，上游 issue #143），不带 allow_fallback
+    的调用会直接抛错变 500。检测到兼容层签名时显式取 13 个知名板块
+    降级名单 —— ``get_stock_list_in_sector`` 对它们照常有效，下游
+    「列板块 → 取成分股 → 下载 K 线」的远程数据流程不受影响；source
+    字段如实标注来源，避免降级名单被误当终端真实板块。
     """
-    sectors = xtdata.get_sector_list()
-    return {"sectors": sectors}
+    if "allow_fallback" in inspect.signature(xtdata.get_sector_list).parameters:
+        sectors = xtdata.get_sector_list(allow_fallback=True)
+        source = "fallback"
+    else:
+        sectors = xtdata.get_sector_list()
+        source = "terminal"
+    return {"sectors": sectors, "source": source}
 
 
 @router.get("/stocks")
