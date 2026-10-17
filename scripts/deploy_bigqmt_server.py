@@ -18,12 +18,25 @@ Redis 配置；含敏感信息，绝不覆盖、绝不入库）。
     python scripts/deploy_bigqmt_server.py --account-id 12345678 \\
         --rpc-transport redis --redis-host 127.0.0.1 --redis-port 6379 --redis-db 5
 
-部署内容：
+    # 沙箱终端（禁 open() 的 QMT 模拟端）：部署单文件扁平包
+    python scripts/deploy_bigqmt_server.py --account-id 12345678 \\
+        --entry singlefile --qmt-python-dir "C:\\QMT_Simulator\\python"
+
+    # 同时生成 qmt-server 侧的客户端配置（默认不生成，手动指定输出路径）
+    python scripts/deploy_bigqmt_server.py --account-id 12345678 \\
+        --client-config-out "C:\\Python312\\Lib\\site-packages\\bigqmt_signal_trader_client_config.py"
+
+部署内容（--entry multifile，默认）：
 
 - ``bigqmt_signal_trader/``            RPC 服务端包（QMT 内置 Python 3.6）
 - ``BIGQMT_REDIS_DRYRUN.py``           QMT 侧入口（策略沙箱加载器）
 - ``bigqmt_signal_trader_strategy.py`` 策略包装（init/handlebar/adjust 驱动）
 - ``bigqmt_signal_trader_redis_rpc_runtime.py`` / ``*_dryrun.py`` 等顶层模块
+
+``--entry singlefile`` 时只部署 ``BIGQMT_PIPE_ALL_IN_ONE.py`` 扁平单文件包
+（内嵌 pipe 配置，沙箱禁 open() 的终端唯一可跑的形态；账号已烘焙进包内，
+部署前校验与 --account-id 一致，见下）。``--client-config-out`` 额外生成
+qmt-server 侧客户端配置（pipe 零 redis 键）。
 
 注意：
 - **源解析**优先 ``import bigqmt_signal_trader`` 的实际落点（editable 安装是
@@ -48,6 +61,7 @@ Redis 配置；含敏感信息，绝不覆盖、绝不入库）。
 from __future__ import annotations
 
 import argparse
+import re
 import shutil
 import sys
 import zipfile
@@ -109,6 +123,53 @@ REDIS_BLOCK_REDIS = '''    "transport": "redis",
     # "protocol": 2,  # redis-py 8.x 默认 RESP3，Redis 5.0 只支持 RESP2
 '''
 
+# --entry singlefile 部署的扁平单文件名（构建产物，见 _singlefile_build/）
+BUNDLE_FILE = "BIGQMT_PIPE_ALL_IN_ONE.py"
+
+# qmt-server 侧客户端配置模板（--client-config-out 输出；
+# 已存在则保留不覆盖，与 local_config 同策略：凭据文件绝不覆盖）。
+CLIENT_CONFIG_TEMPLATE = '''# coding: utf-8
+"""Client-side private config (bigqmt_signal_trader_client_config.py).
+
+由 scripts/deploy_bigqmt_server.py 生成；qmt-server / 外部脚本经
+xtquant_compat.load_client_config() 按 sys.path 解析到本文件。
+请勿提交到版本控制（含账户信息）。
+"""
+
+BIGQMT_ACCOUNT_ID = '__ACCOUNT_ID__'
+BIGQMT_RPC_TIMEOUT_SECONDS = 30.0
+
+BIGQMT_REDIS_CONFIG = {
+__CLIENT_BLOCK__
+}
+
+# 引用/历史读直达 FormulaServer(58600)，未命中回退 RPC
+BIGQMT_FORMULA_SERVER_CONFIG = {"enabled": True}
+# MiniQMT 兼容本地缓存
+BIGQMT_LOCAL_CACHE_CONFIG = {
+    "enabled": True,
+    "dir": None,
+    "fallback_rpc": True,
+    "format": "auto",
+}
+'''
+
+# pipe 客户端块：与 REDIS_BLOCK_PIPE 同理 —— 一个 redis 连接键都不写。
+# 写了 host/port 会被运行时判为「显式配了 redis」，多一条拨号路径，
+# 且在禁连终端上那一 dial 是致命的（docs/IPC_USAGE.md「Deliberately absent」）。
+CLIENT_BLOCK_PIPE = '''    # 命名管道通道：与 QMT 侧 pipe 服务端对接，零依赖、无 socket。
+    # 不写 host/port/db/username/password（原因见 docs/IPC_USAGE.md）。
+    "transport": 'pipe',
+'''
+
+CLIENT_BLOCK_REDIS = '''    "transport": "redis",
+    "host": "{redis_host}",
+    "port": {redis_port},
+    "db": {redis_db},
+    # "username": "",
+    # "password": "",
+'''
+
 
 def _dist_files() -> Path:
     """定位已安装 xtquant-big-convert 的文件根目录（wheel 常规安装路径）。"""
@@ -159,13 +220,61 @@ def _source_version() -> str:
         return "?"
 
 
-def _backup_existing(qmt_dir: Path, backup_dir: Path) -> Path:
+def _resolve_bundle(args_bundle_path: str, source: Path) -> Path:
+    """定位 BIGQMT_PIPE_ALL_IN_ONE.py：--bundle-path → 源目录根。
+
+    源目录是 xtquant_big_convert 源码 checkout 时（如 \\\\host.lan\\Data
+    \\xtquant_big_convert\\src），构建产物就在包旁边。
+    """
+    if args_bundle_path:
+        p = Path(args_bundle_path)
+        if not p.is_file():
+            raise SystemExit(f"--bundle-path 指定的文件不存在：{p}")
+        return p
+    p = source / BUNDLE_FILE
+    if p.is_file():
+        return p
+    raise SystemExit(
+        f"找不到 {BUNDLE_FILE}（--entry singlefile 必需）。\n"
+        "先构建：在装有 bigqmt_signal_trader 包的机器上运行\n"
+        "  _singlefile_build\\build_pipe_single_file_flat.py（PYTHONPATH 指向 QMT\n"
+        "  python 目录），产物拷到源目录根或用 --bundle-path 显式指定。"
+    )
+
+
+def _inspect_bundle(bundle: Path) -> tuple:
+    """校验扁平包可解码且内嵌 pipe 配置，返回 (account_id, transport)。
+
+    包是 GBK 编码（#coding:gbk）；账号在构建时烘焙进 _SHELL_CONFIG，
+    部署到别的资金账号必须重新构建，不能靠改配置。
+    """
+    raw = bundle.read_bytes()
+    try:
+        text = raw.decode("gbk")
+    except UnicodeDecodeError as exc:
+        raise SystemExit(f"{bundle.name} 不是合法 GBK 编码（损坏或非本构建产物）：{exc}")
+    m = re.search(r'^BIGQMT_ACCOUNT_ID\s*=\s*["\']([^"\']+)["\']', text, re.M)
+    account = m.group(1) if m else ""
+    t = re.search(r'["\']transport["\']\s*:\s*["\']([a-z]+)["\']', text)
+    transport = t.group(1) if t else ""
+    if not account or transport != "pipe":
+        raise SystemExit(
+            f"{bundle.name} 内嵌配置异常：account={account or '?'} "
+            f"transport={transport or '?'}（期望 pipe）。请重新构建。"
+        )
+    return account, transport
+
+
+def _backup_existing(qmt_dir: Path, backup_dir: Path, extra_files=()) -> Path:
     """把已存在的受管文件打包备份，返回 zip 路径（无内容可备时返回 None）。"""
     targets = []
     pkg_dir = qmt_dir / "bigqmt_signal_trader"
     if pkg_dir.is_dir():
         targets.append(pkg_dir)
     for name in TOP_LEVEL_FILES:
+        if (qmt_dir / name).is_file():
+            targets.append(qmt_dir / name)
+    for name in extra_files:
         if (qmt_dir / name).is_file():
             targets.append(qmt_dir / name)
     if not targets:
@@ -229,6 +338,42 @@ def _copy_tree(src: Path, dst: Path, dry_run: bool) -> int:
     return count
 
 
+def _emit_client_config(args) -> None:
+    """--client-config-out：生成 qmt-server 侧客户端配置（pipe 零 redis 键）。
+
+    qmt-server 进程靠 sys.path 解析 bigqmt_signal_trader_client_config，
+    装在 exe 里的 qmt-server 不会自动带上 QMT python 目录 —— 这就是
+    「504 redis rpc timeout」的根因（docs/IPC_USAGE.md Troubleshooting）。
+    已存在的文件绝不覆盖（同 local_config 策略）。
+    """
+    if not args.client_config_out:
+        return
+    if args.rpc_transport not in ("pipe", "redis"):
+        raise SystemExit(
+            f"客户端配置模板仅支持 pipe/redis，当前 --rpc-transport "
+            f"{args.rpc_transport}"
+        )
+    out = Path(args.client_config_out)
+    if out.is_file():
+        print(f"[保留] {out} 已存在，不覆盖")
+        return
+    if args.rpc_transport == "redis":
+        block = CLIENT_BLOCK_REDIS.format(
+            redis_host=args.redis_host,
+            redis_port=args.redis_port,
+            redis_db=args.redis_db,
+        )
+    else:
+        block = CLIENT_BLOCK_PIPE
+    text = (CLIENT_CONFIG_TEMPLATE
+            .replace("__ACCOUNT_ID__", args.account_id or "YOUR_ACCOUNT_ID")
+            .replace("__CLIENT_BLOCK__", block.rstrip("\n")))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(text, encoding="utf-8")
+    print(f"[生成] {out}（客户端配置，{args.rpc_transport} 通道）")
+    print("       重启 qmt-server 后生效（load_client_config 在启动时解析一次）")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="部署 xtquant_big_convert 服务端到完整版 QMT 内置 Python（docs/big-qmt.md §3.5）"
@@ -263,6 +408,26 @@ def main() -> int:
         help="RPC 通道（默认 pipe：命名管道，QMT 沙箱安全，零依赖；"
         "pipe 模式 --redis-* 参数不参与模板）",
     )
+    parser.add_argument(
+        "--entry",
+        choices=("multifile", "singlefile"),
+        default="multifile",
+        help="QMT 侧部署形态：multifile=包+顶层入口（完整版 QMT，默认）；"
+        "singlefile=只部署扁平单文件包（沙箱禁 open() 的终端，"
+        "隐含 --rpc-transport pipe）",
+    )
+    parser.add_argument(
+        "--bundle-path",
+        default="",
+        help=f"--entry singlefile 时 {BUNDLE_FILE} 的路径"
+        "（默认：源目录根；找不到会给出构建指引）",
+    )
+    parser.add_argument(
+        "--client-config-out",
+        default="",
+        help="额外生成 qmt-server 侧 bigqmt_signal_trader_client_config.py "
+        "到该路径（如 site-packages 内）；已存在则不覆盖",
+    )
     parser.add_argument("--redis-host", default="127.0.0.1", help="Redis 地址")
     parser.add_argument("--redis-port", type=int, default=6379, help="Redis 端口")
     parser.add_argument("--redis-db", type=int, default=5, help="Redis db")
@@ -270,6 +435,12 @@ def main() -> int:
         "--dry-run", action="store_true", help="只列出将复制的文件，不落盘"
     )
     args = parser.parse_args()
+
+    if args.entry == "singlefile" and args.rpc_transport != "pipe":
+        raise SystemExit(
+            "--entry singlefile 仅支持 --rpc-transport pipe："
+            f"{BUNDLE_FILE} 的 transport 在构建时已烘焙为 pipe，不可换线。"
+        )
 
     source = Path(args.source_dir) if args.source_dir else _resolve_source()
     if not (source / "bigqmt_signal_trader").is_dir():
@@ -286,6 +457,47 @@ def main() -> int:
 
     if not args.dry_run and args.qmt_python_dir:
         qmt_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.entry == "singlefile":
+        # ---- 单文件扁平包部署：沙箱禁 open() 的终端唯一可跑的形态 ----
+        bundle = _resolve_bundle(args.bundle_path, source)
+        embedded_account, embedded_transport = _inspect_bundle(bundle)
+        print(f"[单文件包] {bundle}")
+        print(f"  内嵌配置：account={embedded_account} transport={embedded_transport}")
+        if args.account_id and args.account_id != embedded_account:
+            raise SystemExit(
+                f"账号不匹配：--account-id {args.account_id} ≠ 包内烘焙的 "
+                f"{embedded_account}。\n账号在构建时写死，换账号必须用 "
+                "_singlefile_build\\build_pipe_single_file_flat.py 重新构建，"
+                "不能改配置。"
+            )
+
+        # 0. 覆盖前备份已存在的包文件
+        if not args.dry_run and args.qmt_python_dir and not args.no_backup:
+            zip_path = _backup_existing(qmt_dir, Path(args.backup_dir),
+                                       extra_files=(BUNDLE_FILE,))
+            if zip_path:
+                print(f"[备份] 旧受管文件 -> {zip_path}")
+
+        print(f"[文件] {BUNDLE_FILE}")
+        if not args.dry_run and args.qmt_python_dir:
+            shutil.copy2(bundle, qmt_dir / BUNDLE_FILE)
+
+        # 扁平包自包含配置（内嵌 _SHELL_CONFIG），不写 local_config ——
+        # 写了也会被忽略，反而造成「改了配置却不生效」的假象
+        print("[跳过] bigqmt_signal_trader_local_config.py（扁平包内嵌配置，忽略外部配置）")
+
+        verb = "将复制" if args.dry_run else "已复制"
+        print(f"\n完成：{verb} 1 个文件（单文件入口）")
+        print(
+            "后续步骤：\n"
+            f"  1. 在 QMT 策略编辑器/模型交易面板运行 {BUNDLE_FILE}\n"
+            "     （沙箱终端只支持编辑器挂载运行，禁 open() 的多文件加载器不可用）\n"
+            "  2. qmt-server 侧确认 bigqmt_signal_trader_client_config.py 为 pipe\n"
+            "     （--client-config-out 可生成；重启 qmt-server 生效）"
+        )
+        _emit_client_config(args)
+        return 0
 
     # 0. 覆盖前备份已存在的受管文件（包 + 顶层入口；local_config 不在
     #    受管清单里，本来就不覆盖，凭据不进备份 zip）
@@ -354,6 +566,7 @@ def main() -> int:
         "  2. qmt-server 侧并行运行 mini / bigqmt 双后端，逐字段比对\n"
         "  3. 比对通过后把 local_config 中 rpc_allow_order_methods 改 True 灰度下单"
     )
+    _emit_client_config(args)
     return 0
 
 

@@ -129,16 +129,28 @@ The pipe paths derive from `pipe_name` (default `bigqmt_rpc`) + account:
 ## Step 1 — Place the files
 
 Both sides already live in `C:\QMT_Simulator\python\` on this machine.
-For a fresh QMT machine, the deploy script generates pipe-shaped configs
-(`--rpc-transport` defaults to pipe):
+For a fresh QMT machine, the deploy script handles both deployment
+shapes (`--rpc-transport` defaults to pipe):
 
 ```
-python scripts/deploy_bigqmt_server.py --qmt-python-dir "C:\QMT_Simulator\python" --account-id 88002471
+# A. Full QMT (sandbox permits open()): multi-file package + pipe local_config
+python scripts/deploy_bigqmt_server.py --qmt-python-dir "D:\国金QMT交易端\python" --account-id 88002471
+
+# B. Sandbox-restricted terminal (this simulator): single-file bundle only.
+#    The script locates the bundle next to the source (--bundle-path to
+#    override), verifies its embedded account matches --account-id (the
+#    account is baked in at build time — a mismatch means REBUILD, don't
+#    reconfigure), and copies just that one file:
+python scripts/deploy_bigqmt_server.py --entry singlefile --source-dir "\\host.lan\Data\xtquant_big_convert\src" --qmt-python-dir "C:\QMT_Simulator\python" --account-id 88002471
+
+# C. Optionally generate the qmt-server-side client config in the same run
+#    (never overwrites an existing file; restart qmt-server afterwards):
+python scripts/deploy_bigqmt_server.py ... --client-config-out "C:\Python312\Lib\site-packages\bigqmt_signal_trader_client_config.py"
 ```
 
-Then build the single-file entry on the machine that has the package
-installed (the simulator's sandbox-restricted QMT cannot run the builder;
-any stock Python 3.12 works):
+For shape B, build the single-file entry on a machine that has the
+package installed (the simulator's sandbox cannot run the builder; any
+stock Python 3.12 works):
 
 ```
 cd C:\QMT_Simulator\python
@@ -146,7 +158,8 @@ set PYTHONPATH=C:\QMT_Simulator\python
 python _singlefile_build\build_pipe_single_file_flat.py
 ```
 
-Copy the resulting `BIGQMT_PIPE_ALL_IN_ONE.py` into the QMT python dir.
+Copy the resulting `BIGQMT_PIPE_ALL_IN_ONE.py` into the QMT python dir
+(or leave it next to the source dir and let the deploy script find it).
 
 ## Step 2 — Start the IPC server (inside QMT)
 
