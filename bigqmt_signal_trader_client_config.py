@@ -9,12 +9,13 @@ BIGQMT_ACCOUNT_ID = '31292575'
 BIGQMT_RPC_TIMEOUT_SECONDS = 30.0
 
 BIGQMT_REDIS_CONFIG = {
-    "transport": 'redis',
-    "host": '127.0.0.1',
-    "port": 6379,
-    "db": 5,
-    "username": '',
-    "password": '',
+    # Named-pipe wire: zero deps, no socket, no redis package on either end;
+    # the only import the QMT sandbox must tolerate is ctypes (kernel32).
+    # Deliberately NO host/port/db/username/password keys: with any of those
+    # the client treats redis as explicit and subscribes exec events via
+    # redis instead of the pipe events channel the server publishes on.
+    # See docs/IPC_USAGE.md + docs/IPC_QMT_TEST_PASS_DESIGN.md.
+    "transport": 'pipe',
 }
 
 # Reference/history reads go straight to Big QMT's FormulaServer (port

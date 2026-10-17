@@ -1,7 +1,8 @@
-"""BigQmtAdapter ── 基于 xtquant_big_convert 的交易后端（bigqmt 模式）。
+r"""BigQmtAdapter ── 基于 xtquant_big_convert 的交易后端（bigqmt 模式）。
 
 本类运行于 Windows qmt-server 进程内，把 qmt-bridge 每个交易接口翻译成
-``xtquant_big_convert`` 客户端的 Redis/ZMQ RPC 调用，由完整版 QMT 内置
+``xtquant_big_convert`` 客户端的 RPC 调用（transport 可插拔：pipe / redis /
+zmq / mysql，本部署用 **命名管道**，见 docs/IPC_USAGE.md），由完整版 QMT 内置
 Python 沙箱中的服务端（``passorder`` / ``get_trade_detail_data``）执行。
 
 与完整版 QMT 的通信全景（读走通道A直连，写走通道B排队；行前缀对齐仅在
@@ -14,16 +15,19 @@ Python 沙箱中的服务端（``passorder`` / ``get_trade_detail_data``）执�
         （与行情通道同一客户端）             无需策略实例运行，休市可用
                                           ② 策略沙箱（内置 Python 3.6）
     BigQmtRpcClient ──通道B(写)──┐          bigqmt_rpc_bootstrap 模型交易实例
-      LPUSH 请求                  │          （须"运行中"——休市时 QMT 引擎不驱动）
-      bigqmt:rpc:queue:<账号> ◄───┘          init 启动 RPC 服务端；adjust 每 500ms
-        （Redis db5，RESP2）                  排空队列 → passorder / cancel /
-                                               get_trade_detail_data 执行
-                                            回写 bigqmt:rpc:resp:<账号>:<req_id>
-    （阻塞等该键，默认 6s 超时）◄──────────    （TTL 60s）
+      请求 over 命名管道          │          （须"运行中"——休市时 QMT 引擎不驱动）
+      \\.\pipe\\bigqmt_rpc_<账号> ◄┘           init 启动 RPC 服务端；adjust 每 100ms
+        （pipe：无 socket / 无 redis 包）     排空队列 → passorder / cancel /
+                                             get_trade_detail_data 执行
+      （阻塞等响应，默认 6s 超时）◄─────────   响应经同一管道回写
+                                             推送走 \\.\pipe\\bigqmt_rpc_events_<账号>
 
     通道A/B 共用一个 BigQmtRpcClient：每次 call 先试 FormulaServer 能否代答
     （method 白名单 + 参数可翻译，如 get_market_data_ex 需显式字段集），
-    不行才落通道B。账号两端必须一致，否则请求进 A 队列、服务端听 B 队列
+    不行才落通道B。通道B 的线由 ``bigqmt_signal_trader_client_config.py`` 的
+    ``BIGQMT_REDIS_CONFIG["transport"]`` 决定（redis 形态为
+    LPUSH bigqmt:rpc:queue:<账号>（db5，RESP2），响应键 TTL 60s）。
+    账号两端必须一致，否则请求进 A 队列、服务端听 B 队列
     （表现为 ping 超时）；下单另受 QMT 侧 rpc_allow_order_methods 门控。
 
 关键约定（``docs/big-qmt.md`` §3.2/§4）：
@@ -112,8 +116,8 @@ class BigQmtAdapter:
         """初始化 compat 单例并连接完整版 QMT 的 RPC 服务端。
 
         ``configure()`` 读取 ``bigqmt_signal_trader_local_config`` 模块或
-        ``BIGQMT_*`` 环境变量（Redis 地址 / 账户）；``connect()`` 内部会
-        发 ``ping`` RPC 验证链路，Redis 或 QMT 侧服务端不可用时启动即失败。
+        ``BIGQMT_*`` 环境变量（RPC 通道 / 账户）；``connect()`` 内部会
+        发 ``ping`` RPC 验证链路，通道或 QMT 侧服务端不可用时启动即失败。
         """
         compat = self._load_compat()
 

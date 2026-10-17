@@ -21,8 +21,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 # bigqmt 后端可选 RPC 通道（与上游 transports/factory.KNOWN_TRANSPORTS 对齐）：
-# redis（默认）/ zmq / mysql / shm（上游占位，首次调用即抛 TransportError）
-BIGQMT_RPC_TRANSPORTS = ("redis", "zmq", "mysql", "shm")
+# pipe（本部署默认，命名管道，QMT 沙箱安全）/ redis / zmq / mysql / shm
+# （上游占位，首次调用即抛 TransportError）。pipe 只需要 QMT 放行 ctypes，
+# 不依赖 socket / redis 包 / pip 安装，见 docs/IPC_QMT_TEST_PASS_DESIGN.md。
+BIGQMT_RPC_TRANSPORTS = ("pipe", "redis", "zmq", "mysql", "shm")
 
 
 @dataclass

@@ -14,9 +14,9 @@ Redis 配置；含敏感信息，绝不覆盖、绝不入库）。
     # 先看会复制哪些文件，不落盘
     python scripts/deploy_bigqmt_server.py --dry-run
 
-    # 显式指定账户与 Redis（仅首次生成模板时生效）
+    # 显式指定账户与 Redis（仅首次生成模板时生效；--rpc-transport redis 时）
     python scripts/deploy_bigqmt_server.py --account-id 12345678 \\
-        --redis-host 127.0.0.1 --redis-port 6379 --redis-db 5
+        --rpc-transport redis --redis-host 127.0.0.1 --redis-port 6379 --redis-db 5
 
 部署内容：
 
@@ -37,8 +37,10 @@ Redis 配置；含敏感信息，绝不覆盖、绝不入库）。
 - **不复制** wheel 附带的顶层 ``xtquant/`` 目录 —— QMT 目录里是真实 xtquant；
   qmt-bridge 的行情通道由 ``server/xtdata_source.py`` 直接解析
   xtquant-big-convert 包（editable 安装 → 源码 src/ 本体），用不到它。
-- QMT 侧 Python 3.6 只需所选 transport 的依赖：Redis 模式为纯 Python
-  （redis-py 3.5.x，可手动复制包目录规避旧 OpenSSL SSL 问题）。
+- QMT 侧 Python 3.6 只需所选 transport 的依赖：**pipe 零依赖**（ctypes +
+  kernel32，沙箱只需放行 ctypes，本部署默认，见 docs/IPC_USAGE.md）；
+  Redis 模式为纯 Python（redis-py 3.5.x，可手动复制包目录规避旧
+  OpenSSL SSL 问题）。
 - 下单默认关闭：QMT 侧配置 ``rpc_allow_order_methods: False``（默认），
   需显式开启（docs/big-qmt.md §5.3 灰度开关）。
 """
@@ -68,28 +70,43 @@ PACKAGES = ["bigqmt_signal_trader"]
 LOCAL_CONFIG_TEMPLATE = '''#coding:utf-8
 """bigqmt_signal_trader 本地配置（bigqmt_signal_trader_local_config.py）。
 
-由 scripts/deploy_bigqmt_server.py 生成，包含账户与 Redis 连接信息，
+由 scripts/deploy_bigqmt_server.py 生成，包含账户与 RPC 通道配置，
 请勿提交到版本控制（本文件位于 QMT 安装目录，天然在仓库之外）。
 """
 
 # 完整版 QMT 绑定的资金账号（单实例单账户）
-BIGQMT_ACCOUNT_ID = "{account_id}"
+BIGQMT_ACCOUNT_ID = "__ACCOUNT_ID__"
 
-BIGQMT_REDIS_CONFIG = {{
+BIGQMT_REDIS_CONFIG = {
+__REDIS_BLOCK__
+    # 下单方法（submit_order / cancel_order）门控，默认关闭 ——
+    # 灰度验证字段对比通过后再改 True 开启下单（docs/big-qmt.md §6.4）
+    "rpc_allow_order_methods": False,
+}
+
+# RPC 超时（秒），默认 6.0；下载大窗口数据时可调大
+# BIGQMT_RPC_TIMEOUT_SECONDS = 6.0
+'''
+
+# --rpc-transport pipe（默认）: 命名管道，QMT 沙箱安全。redis 连接键一个
+# 都不写 —— 配置里出现 host/port 会让运行时把它当「显式配了 redis」，
+# 多出一条拨号路径（docs/IPC_USAGE.md「Deliberately absent」节）。
+REDIS_BLOCK_PIPE = '''    # 命名管道通道（本部署默认）：零依赖、无 socket、无 redis 包。
+    # 沙箱只需放行 ctypes；管道路径由 pipe_name + 账号派生：
+    #   \\\\.\\pipe\\bigqmt_rpc_<账号>           请求/响应
+    #   \\\\.\\pipe\\bigqmt_rpc_events_<账号>    推送（行情/委托/成交）
+    "transport": "pipe",
+    "redis_enabled": False,
+'''
+
+# --rpc-transport redis: 原始 Redis 通道（LPUSH bigqmt:rpc:queue:<账号>）。
+REDIS_BLOCK_REDIS = '''    "transport": "redis",
     "host": "{redis_host}",
     "port": {redis_port},
     "db": {redis_db},
     # "username": "",
     # "password": "",
     # "protocol": 2,  # redis-py 8.x 默认 RESP3，Redis 5.0 只支持 RESP2
-
-    # 下单方法（submit_order / cancel_order）门控，默认关闭 ——
-    # 灰度验证字段对比通过后再改 True 开启下单（docs/big-qmt.md §6.4）
-    "rpc_allow_order_methods": False,
-}}
-
-# RPC 超时（秒），默认 6.0；下载大窗口数据时可调大
-# BIGQMT_RPC_TIMEOUT_SECONDS = 6.0
 '''
 
 
@@ -239,6 +256,13 @@ def main() -> int:
         default="",
         help="完整版 QMT 绑定的资金账号（写入 local_config 模板）",
     )
+    parser.add_argument(
+        "--rpc-transport",
+        choices=("pipe", "redis", "zmq", "mysql"),
+        default="pipe",
+        help="RPC 通道（默认 pipe：命名管道，QMT 沙箱安全，零依赖；"
+        "pipe 模式 --redis-* 参数不参与模板）",
+    )
     parser.add_argument("--redis-host", default="127.0.0.1", help="Redis 地址")
     parser.add_argument("--redis-port", type=int, default=6379, help="Redis 端口")
     parser.add_argument("--redis-db", type=int, default=5, help="Redis db")
@@ -301,23 +325,32 @@ def main() -> int:
     if config_path.is_file():
         print(f"\n[保留] {config_path} 已存在，不覆盖")
     else:
-        print(f"\n[生成] {config_path}（账户 ID + Redis 配置模板）")
-        if not args.dry_run and args.qmt_python_dir:
-            config_path.write_text(
-                LOCAL_CONFIG_TEMPLATE.format(
-                    account_id=args.account_id or "YOUR_ACCOUNT_ID",
-                    redis_host=args.redis_host,
-                    redis_port=args.redis_port,
-                    redis_db=args.redis_db,
-                ),
-                encoding="utf-8",
+        print(f"\n[生成] {config_path}（账户 ID + {args.rpc_transport} 通道配置模板）")
+        if args.rpc_transport == "redis":
+            redis_block = REDIS_BLOCK_REDIS.format(
+                redis_host=args.redis_host,
+                redis_port=args.redis_port,
+                redis_db=args.redis_db,
             )
+        else:
+            redis_block = REDIS_BLOCK_PIPE.replace(
+                '"transport": "pipe"',
+                '"transport": "%s"' % args.rpc_transport,
+            )
+        text = (LOCAL_CONFIG_TEMPLATE
+                .replace("__ACCOUNT_ID__", args.account_id or "YOUR_ACCOUNT_ID")
+                .replace("__REDIS_BLOCK__", redis_block.rstrip("\n")))
+        if not args.dry_run and args.qmt_python_dir:
+            config_path.write_text(text, encoding="utf-8")
 
     verb = "将复制" if args.dry_run else "已复制"
     print(f"\n完成：{verb} {total} 个文件")
+    entry = ("BIGQMT_REDIS_DRYRUN.py（多文件入口）" if args.rpc_transport == "redis"
+             else "单文件入口（沙箱禁 open() 的终端用 *_ALL_IN_ONE.py 扁平包，"
+                  "见 docs/IPC_USAGE.md；pipe 通道下由该包内嵌配置决定 transport）")
     print(
-        "后续步骤（docs/big-qmt.md §6）：\n"
-        "  1. 在 QMT 内置 Python 中运行 BIGQMT_REDIS_DRYRUN.py（保持下单关闭）\n"
+        f"后续步骤（docs/big-qmt.md §6）：\n"
+        f"  1. 在 QMT 内置 Python 中运行 {entry}（保持下单关闭）\n"
         "  2. qmt-server 侧并行运行 mini / bigqmt 双后端，逐字段比对\n"
         "  3. 比对通过后把 local_config 中 rpc_allow_order_methods 改 True 灰度下单"
     )
