@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from pathlib import Path
 from time import sleep
 from typing import Any
@@ -189,6 +189,80 @@ def fetch_prices_from_server(
                 break
 
     return prices
+
+
+def _fetch_recent_closes_per_code(
+    host: str,
+    port: int,
+    api_key: str,
+    stock_codes: list[str],
+    start_time: str,
+    end_time: str,
+) -> dict[str, dict[str, float]]:
+    """拉取近端窗口内的日 K 收盘价（fetch_daily_closes 的一跳包装）。
+
+    单独成函数是为给 :func:`fetch_latest_prices` 留出可替换的兜底取价
+    通道（测试 seam）：只读 ``market_data_ex``，不触发下载与轮询。
+    """
+    return fetch_daily_closes(host, port, api_key, stock_codes, start_time, end_time)
+
+
+def fetch_latest_prices(
+    host: str,
+    port: int,
+    api_key: str,
+    stock_codes: list[str],
+    recent_days: int = 14,
+) -> tuple[dict[str, float], str]:
+    """获取最新价格：full_tick 优先，失败/为空时回退近端日 K 收盘价。
+
+    qmt-server 行情端拥塞或休市时 full_tick 可能超时甚至一只价都拿不到；
+    日 K 走 FormulaServer 直连（不依赖 QMT 端策略进程），休市可用，按
+    最近交易日收盘价估值（YYYYMMDD 字典序取最大即最近交易日）。
+
+    Args:
+        recent_days: 回退窗口天数（自然日），覆盖停牌补数场景。
+
+    Returns:
+        ``(prices, source)``，source 为 ``"tick"``（实时快照）或
+        ``"close"``（收盘价兜底）；两条通道都失败时价格为空、
+        source 为 ``"close"``。
+    """
+    if not stock_codes:
+        return {}, "tick"
+
+    try:
+        prices = fetch_prices_from_server(host, port, api_key, stock_codes)
+        if prices:
+            return prices, "tick"
+        logger.warning(
+            "full_tick 未取到任何价格（%d 只），回退日 K 收盘价", len(stock_codes)
+        )
+    except Exception:
+        logger.exception("full_tick 获取失败，回退日 K 收盘价")
+
+    end = datetime.now()
+    try:
+        closes = _fetch_recent_closes_per_code(
+            host,
+            port,
+            api_key,
+            stock_codes,
+            (end - timedelta(days=recent_days)).strftime("%Y%m%d"),
+            end.strftime("%Y%m%d"),
+        )
+    except Exception:
+        logger.exception("收盘价兜底取价也失败")
+        return {}, "close"
+
+    latest: dict[str, float] = {}
+    for code, series in closes.items():
+        if not series:
+            continue  # 窗口内无数据的代码剔除，不进入价格表
+        price = series[max(series)]
+        if isinstance(price, (int, float)) and price > 0:
+            latest[code] = float(price)
+    return latest, "close"
 
 
 # ── 每日收盘价（用于无委托日的持仓重估）────────────────────────────

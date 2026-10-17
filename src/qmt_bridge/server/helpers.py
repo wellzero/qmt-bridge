@@ -10,8 +10,32 @@ xtdata 的行情查询接口（如 get_market_data / get_market_data_ex / get_fi
 本模块的函数负责将这些数据统一转换为可序列化的 Python 原生类型。
 """
 
+import inspect
+
 import numpy as np
 import pandas as pd
+
+
+def compat_only_kwargs(func, **kwargs):
+    """按函数签名过滤 kwargs，只保留目标函数显式声明的键。
+
+    用于向不同后端形态的 xtdata 同名方法传兼容参数：bigqmt 兼容层的
+    ``get_full_tick`` / ``get_market_data_ex`` 显式声明 ``timeout_seconds``
+    （短超时，防休市时 RPC-only 接口挂起占满 anyio 线程池），mini 后端
+    直连的 xtquant.xtdata 同名方法不认该参数——统一经本函数过滤，
+    调用方无需按后端分支。声明了 ``**kwargs`` 的目标不视为支持任何键
+    （真 xtdata 方法支持的键由显式参数决定，``**kwargs`` 只吞多余参数，
+    不能作为透传依据）。
+
+    Args:
+        func: 目标可调用对象。
+        **kwargs: 待过滤的关键字参数。
+
+    Returns:
+        只含目标签名显式声明键的字典。
+    """
+    params = inspect.signature(func).parameters
+    return {k: v for k, v in kwargs.items() if k in params}
 
 
 def _numpy_to_python(obj):

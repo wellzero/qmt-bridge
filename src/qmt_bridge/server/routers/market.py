@@ -16,9 +16,17 @@
 from fastapi import APIRouter, Query
 from ..xtdata_source import xtdata
 
-from ..helpers import _dataframe_dict_to_records, _numpy_to_python
+from ..helpers import _dataframe_dict_to_records, _numpy_to_python, compat_only_kwargs
 
 router = APIRouter(prefix="/api/market", tags=["market"])
+
+# RPC-only 接口的显式短超时（秒）。bigqmt 后端下 QMT 端策略实例不运行时
+# （休市/节假日）RPC 无消费者，full_tick 等接口按上游默认要等 30~120s 才
+# 超时；行情路由全是 sync def（anyio 线程池默认 40 线程），这类请求叠加
+# 几次即占满线程池，连 /api/meta/health 都无响应。bigqmt 兼容层支持
+# timeout_seconds，mini 后端签名不认则由 compat_only_kwargs 过滤掉。
+FULL_TICK_TIMEOUT_SECONDS = 6.0
+BAR_QUERY_TIMEOUT_SECONDS = 15.0
 
 # 主要指数列表（用于 /indices 端点快速查询大盘行情）
 MAJOR_INDICES = [
@@ -58,7 +66,12 @@ def get_full_tick(
     """
     # 将逗号分隔的代码字符串拆分为列表
     stock_list = [s.strip() for s in stocks.split(",")]
-    raw = xtdata.get_full_tick(code_list=stock_list)
+    raw = xtdata.get_full_tick(
+        code_list=stock_list,
+        **compat_only_kwargs(
+            xtdata.get_full_tick, timeout_seconds=FULL_TICK_TIMEOUT_SECONDS
+        ),
+    )
     return {"data": _numpy_to_python(raw)}
 
 
@@ -74,7 +87,12 @@ def get_major_indices():
 
     底层调用: xtdata.get_full_tick(code_list=MAJOR_INDICES)
     """
-    raw = xtdata.get_full_tick(code_list=MAJOR_INDICES)
+    raw = xtdata.get_full_tick(
+        code_list=MAJOR_INDICES,
+        **compat_only_kwargs(
+            xtdata.get_full_tick, timeout_seconds=FULL_TICK_TIMEOUT_SECONDS
+        ),
+    )
     return {"indices": MAJOR_INDICES, "data": _numpy_to_python(raw)}
 
 
@@ -127,6 +145,9 @@ def get_market_data_ex(
         count=count,
         dividend_type=dividend_type,
         fill_data=fill_data,
+        **compat_only_kwargs(
+            xtdata.get_market_data_ex, timeout_seconds=BAR_QUERY_TIMEOUT_SECONDS
+        ),
     )
     return {"data": _dataframe_dict_to_records(raw)}
 

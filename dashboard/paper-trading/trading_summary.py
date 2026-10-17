@@ -36,7 +36,7 @@ from data_loader import (
 )
 from pricing import (
     build_live_summaries_df,
-    fetch_prices_from_server,
+    fetch_latest_prices,
     save_price_cache,
 )
 
@@ -76,23 +76,21 @@ def _do_fetch_prices() -> None:
         st.warning("未找到任何股票代码，无法更新价格")
         return
 
-    try:
-        with st.spinner("正在从 qmt-server 拉取最新价（超时将自动重试一次）…"):
-            prices = fetch_prices_from_server(
-                server_host,
-                int(server_port),
-                server_api_key,
-                sorted(all_stock_codes),
-            )
-    except Exception as exc:
-        st.error(f"获取行情失败：{exc}")
-        return
+    with st.spinner("正在从 qmt-server 拉取最新价（失败时回退收盘价）…"):
+        prices, source = fetch_latest_prices(
+            server_host,
+            int(server_port),
+            server_api_key,
+            sorted(all_stock_codes),
+        )
 
     if not prices:
         st.warning("未能获取到任何有效价格")
         return
 
-    save_price_cache(data_dir, prices, close=False)
+    # 兜底拿到的是收盘价，按收盘缓存落盘（YYYYMMDD.json），避免把
+    # 收盘价标成盘中最新价误导价格源展示
+    save_price_cache(data_dir, prices, close=source == "close")
 
     # 重新计算所有账户实时统计
     config = load_config(data_dir)
@@ -100,8 +98,9 @@ def _do_fetch_prices() -> None:
     st.session_state["last_price_update"] = len(prices)
 
     st.cache_data.clear()
+    label = "收盘价（full_tick 失败已回退）" if source == "close" else "最新价"
     st.success(
-        f"已更新 {len(prices)} 只股票最新价，并重新计算 {len(live_summaries)} 个账户实时盈亏"
+        f"已更新 {len(prices)} 只股票{label}，并重新计算 {len(live_summaries)} 个账户实时盈亏"
     )
     st.rerun()
 
