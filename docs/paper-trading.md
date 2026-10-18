@@ -31,6 +31,47 @@ qmt-server --trading --paper-trading --api-key your-secret-key \
 | `QMT_BRIDGE_PAPER_TRADING_DATA_DIR` | `./data/paper_trading` | 数据目录 |
 | `QMT_BRIDGE_PAPER_TRADING_CONFIG_PATH` | _(空)_ | 配置文件路径（可选） |
 
+## 实际部署拓扑（本机生产环境，2026-10-17 核实）
+
+当前主机上模拟交易服务的完整链路：
+
+```text
+┌──────────────────────────────────────────────────────────────┐
+│  27 个 lumibot 策略进程（客户端）                              │
+│  /home/claude/quant_free_strategies/**/backtest/*_paper_test │
+│  TRADING_BROKER=qmt_bridge  DATA_SOURCE=qmt_bridge           │
+│  每策略一个模拟账户：<策略名>_paper，初始资金 ¥100,000          │
+└──────────────────────────┬───────────────────────────────────┘
+                           │ HTTP/JSON (X-API-Key 认证)
+                           ▼
+              localhost:8083（docker 端口转发）
+                           │
+┌──────────────────────────▼───────────────────────────────────┐
+│  docker 容器 "windows"（镜像 dockurr/windows，Windows 虚拟机）  │
+│  └─ QMT 客户端 + 本仓库的桥接服务端（qmt-server / 模拟撮合引擎）  │
+│     账户资金/持仓/委托/成交全部在服务端内存 + CSV/JSON 持久化     │
+└──────────────────────────────────────────────────────────────┘
+```
+
+要点：
+
+- **服务提供方**：模拟交易由 Windows 容器内 QMT 桥接服务的 FastAPI 路由
+  （`/api/paper_accounts/*`、`/api/paper_trading/*`，即下文"整体架构"所述模块）
+  提供，端口 `8083` 经 docker 转发映射到本机（文档示例中的 8000 对应本环境 8083）。
+- **认证**：`X-API-Key` 请求头（不是 `Authorization: Bearer`）；
+  key 在各策略 `backtest/.env` 的 `QMT_BRIDGE_API_KEY` 中。
+- **策略客户端**：27 个 `*_paper_test.py` 进程（`/opt/quantfree/bin/python`），
+  分布在 `bluechip/`、`cn_strategies/`、`etf/`、`joinquant/`、`month/` 分组下，
+  2026-10-08 以 `setsid nohup` 方式启动（无 systemd 托管，父进程为 PID 1）。
+- **监控面板**：`dashboard/paper-trading/trading_summary.py`（Streamlit，端口 8501），
+  由仓库根目录 `stream-lit.sh`（start/stop/restart/status）管理，
+  日志 `logs/trading_summary.log`，数据同样来自 8083 API。
+- **运维通道**：`/tmp/vmctl/recv.py`（端口 8898）仅用于向 Windows 虚拟机
+  下发一次性命令（GET `/cmd.txt` 读后清空），与交易链路无关；
+  端口 8082 转发到虚拟机 8006 Web 查看器。
+- **注意**：`dockurr/windows` 是完整虚拟机，`docker exec` 无法进入 Windows 侧，
+  排查需走 8898 命令通道或 8082 Web 控制台。
+
 ## 整体架构
 
 ```text
