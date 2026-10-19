@@ -22,6 +22,11 @@ Redis 配置；含敏感信息，绝不覆盖、绝不入库）。
     python scripts/deploy_bigqmt_server.py --account-id 12345678 \\
         --entry singlefile --qmt-python-dir "C:\\QMT_Simulator\\python"
 
+    # 沙箱禁 open() 但放行 CRT/Win32 读文件的终端：pipe 多文件形态
+    # （BIGQMT_PIPE_DRYRUN.py + bigqmt_pipe_signal_trader/ 模块树，与扁平包同源）
+    python scripts/deploy_bigqmt_server.py --account-id 12345678 \\
+        --entry pipe_dryrun --qmt-python-dir "C:\\QMT_Simulator\\python"
+
     # 同时生成 qmt-server 侧的客户端配置（默认不生成，手动指定输出路径）
     python scripts/deploy_bigqmt_server.py --account-id 12345678 \\
         --client-config-out "C:\\Python312\\Lib\\site-packages\\bigqmt_signal_trader_client_config.py"
@@ -80,6 +85,16 @@ TOP_LEVEL_FILES = [
 ]
 # QMT 侧需要复制的包目录
 PACKAGES = ["bigqmt_signal_trader"]
+
+# --entry pipe_dryrun 部署的模块树与入口（pipe 多文件形态）。
+# 树由 BIGQMT_PIPE_ALL_IN_ONE.py 经 tools/extract_pipe_modules.py 抽取，
+# 逐模块字节级往返校验，与扁平单文件包严格同码；入口 BIGQMT_PIPE_DRYRUN.py
+# 自带 os.open / kernel32.CreateFileW 读文件回退，可在「沙箱禁 open() 但
+# 放行 CRT/Win32」的终端（如 QMT 模拟端）直接跑多文件形态（FILEIO_PROBE.py
+# 可先行探测）。树内 local_config 不随树复制 —— 凭据按模板生成（见 main）。
+PIPE_DRYRUN_TREE = "bigqmt_pipe_signal_trader"
+PIPE_DRYRUN_ENTRY = "BIGQMT_PIPE_DRYRUN.py"
+LOCAL_CONFIG_NAME = "bigqmt_signal_trader_local_config.py"
 
 LOCAL_CONFIG_TEMPLATE = '''#coding:utf-8
 """bigqmt_signal_trader 本地配置（bigqmt_signal_trader_local_config.py）。
@@ -265,12 +280,17 @@ def _inspect_bundle(bundle: Path) -> tuple:
     return account, transport
 
 
-def _backup_existing(qmt_dir: Path, backup_dir: Path, extra_files=()) -> Path:
+def _backup_existing(qmt_dir: Path, backup_dir: Path, extra_files=(),
+                     extra_dirs=()) -> Path:
     """把已存在的受管文件打包备份，返回 zip 路径（无内容可备时返回 None）。"""
     targets = []
     pkg_dir = qmt_dir / "bigqmt_signal_trader"
     if pkg_dir.is_dir():
         targets.append(pkg_dir)
+    for name in extra_dirs:
+        d = qmt_dir / name
+        if d.is_dir():
+            targets.append(d)
     for name in TOP_LEVEL_FILES:
         if (qmt_dir / name).is_file():
             targets.append(qmt_dir / name)
@@ -297,36 +317,41 @@ def _backup_existing(qmt_dir: Path, backup_dir: Path, extra_files=()) -> Path:
     return zip_path
 
 
-def _report_leftovers(source: Path, qmt_dir: Path) -> list:
+def _report_leftovers(source: Path, qmt_dir: Path,
+                      extra_trees: tuple = ()) -> list:
     """目标里存在、上游已没有的受管文件（上游改名/删除后残留）。"""
     left = []
-    src_pkg = source / "bigqmt_signal_trader"
-    dst_pkg = qmt_dir / "bigqmt_signal_trader"
-    if src_pkg.is_dir() and dst_pkg.is_dir():
-        src_files = {
-            p.relative_to(src_pkg).as_posix()
-            for p in src_pkg.rglob("*")
-            if p.is_file() and "__pycache__" not in p.parts
-        }
-        for p in sorted(dst_pkg.rglob("*.py")):
-            if "__pycache__" in p.parts:
-                continue
-            rel = p.relative_to(dst_pkg).as_posix()
-            if rel not in src_files:
-                left.append("bigqmt_signal_trader/" + rel)
+    for tree in ("bigqmt_signal_trader",) + tuple(extra_trees):
+        src_pkg = source / tree
+        dst_pkg = qmt_dir / tree
+        if src_pkg.is_dir() and dst_pkg.is_dir():
+            src_files = {
+                p.relative_to(src_pkg).as_posix()
+                for p in src_pkg.rglob("*")
+                if p.is_file() and "__pycache__" not in p.parts
+            }
+            for p in sorted(dst_pkg.rglob("*.py")):
+                if "__pycache__" in p.parts:
+                    continue
+                rel = p.relative_to(dst_pkg).as_posix()
+                if rel not in src_files:
+                    left.append(tree + "/" + rel)
     for name in TOP_LEVEL_FILES:
         if (qmt_dir / name).is_file() and not (source / name).is_file():
             left.append(name)
     return left
 
 
-def _copy_tree(src: Path, dst: Path, dry_run: bool) -> int:
-    """复制包目录（跳过 __pycache__），返回复制的文件数。"""
+def _copy_tree(src: Path, dst: Path, dry_run: bool,
+               skip_files: tuple = ()) -> int:
+    """复制包目录（跳过 __pycache__ 与 skip_files 内的文件名），返回文件数。"""
     count = 0
     for item in sorted(src.rglob("*")):
         if "__pycache__" in item.parts:
             continue
         if item.is_dir():
+            continue
+        if item.name in skip_files:
             continue
         rel = item.relative_to(src)
         target = dst / rel
@@ -410,11 +435,13 @@ def main() -> int:
     )
     parser.add_argument(
         "--entry",
-        choices=("multifile", "singlefile"),
+        choices=("multifile", "singlefile", "pipe_dryrun"),
         default="multifile",
         help="QMT 侧部署形态：multifile=包+顶层入口（完整版 QMT，默认）；"
-        "singlefile=只部署扁平单文件包（沙箱禁 open() 的终端，"
-        "隐含 --rpc-transport pipe）",
+        "singlefile=只部署扁平单文件包（沙箱禁 open() 且 CRT/Win32 也被拦的终端，"
+        "隐含 --rpc-transport pipe）；pipe_dryrun=部署 BIGQMT_PIPE_DRYRUN.py "
+        "+ bigqmt_pipe_signal_trader/ 模块树（pipe 多文件形态，入口自带 "
+        "os.open/kernel32 读文件回退，适合沙箱禁 open() 但放行底层 IO 的终端）",
     )
     parser.add_argument(
         "--bundle-path",
@@ -436,10 +463,12 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    if args.entry == "singlefile" and args.rpc_transport != "pipe":
+    if args.entry in ("singlefile", "pipe_dryrun") and args.rpc_transport != "pipe":
         raise SystemExit(
-            "--entry singlefile 仅支持 --rpc-transport pipe："
-            f"{BUNDLE_FILE} 的 transport 在构建时已烘焙为 pipe，不可换线。"
+            f"--entry {args.entry} 仅支持 --rpc-transport pipe："
+            f"{BUNDLE_FILE if args.entry == 'singlefile' else PIPE_DRYRUN_ENTRY} "
+            "的 transport 为 pipe（pipe_dryrun 入口在加载配置后也会强制 "
+            "transport=pipe 并剥掉 redis 连接键）。"
         )
 
     source = Path(args.source_dir) if args.source_dir else _resolve_source()
@@ -493,6 +522,83 @@ def main() -> int:
             "后续步骤：\n"
             f"  1. 在 QMT 策略编辑器/模型交易面板运行 {BUNDLE_FILE}\n"
             "     （沙箱终端只支持编辑器挂载运行，禁 open() 的多文件加载器不可用）\n"
+            "  2. qmt-server 侧确认 bigqmt_signal_trader_client_config.py 为 pipe\n"
+            "     （--client-config-out 可生成；重启 qmt-server 生效）"
+        )
+        _emit_client_config(args)
+        return 0
+
+    if args.entry == "pipe_dryrun":
+        # ---- pipe 多文件部署：BIGQMT_PIPE_DRYRUN.py + bigqmt_pipe_signal_trader/ ----
+        # 模块树与 BIGQMT_PIPE_ALL_IN_ONE.py 扁平包同源（extract_pipe_modules.py
+        # 抽取、逐模块字节级往返校验）。入口自带 os.open / kernel32.CreateFileW
+        # 读文件回退，因此可在「沙箱禁 builtins.open 但放行 CRT/Win32」的终端
+        # 跑多文件形态；CRIO/Win32 也被拦的终端退回 --entry singlefile。
+        tree_src = source / PIPE_DRYRUN_TREE
+        if not (tree_src / "bigqmt_signal_trader").is_dir():
+            raise SystemExit(
+                f"源目录缺少 {PIPE_DRYRUN_TREE}/bigqmt_signal_trader：{source}\n"
+                "先抽取（xtquant_big_convert 仓库）："
+                "python tools/extract_pipe_modules.py，"
+                "产物即源目录下的 bigqmt_pipe_signal_trader/。"
+            )
+        entry_src = source / PIPE_DRYRUN_ENTRY
+        if not entry_src.is_file():
+            raise SystemExit(f"源目录缺少 {PIPE_DRYRUN_ENTRY}：{source}")
+
+        # 0. 覆盖前备份已存在的模块树与入口
+        if not args.dry_run and args.qmt_python_dir and not args.no_backup:
+            zip_path = _backup_existing(
+                qmt_dir, Path(args.backup_dir),
+                extra_files=(PIPE_DRYRUN_ENTRY,),
+                extra_dirs=(PIPE_DRYRUN_TREE,))
+            if zip_path:
+                print(f"[备份] 旧受管文件 -> {zip_path}")
+
+        # 1. 复制模块树；树内随带的 local_config 不复制（下一按模板生成，
+        #    避免把抽取源里烘焙的账号当成部署账号静默落地）
+        print(f"[树] {PIPE_DRYRUN_TREE}/")
+        total = _copy_tree(tree_src, qmt_dir / PIPE_DRYRUN_TREE, args.dry_run,
+                           skip_files=(LOCAL_CONFIG_NAME,))
+        if not args.dry_run and args.qmt_python_dir:
+            for cache in sorted((qmt_dir / PIPE_DRYRUN_TREE).rglob("__pycache__")):
+                shutil.rmtree(cache, ignore_errors=True)
+
+        # 2. 复制入口
+        print(f"[文件] {PIPE_DRYRUN_ENTRY}")
+        if not args.dry_run and args.qmt_python_dir:
+            shutil.copy2(entry_src, qmt_dir / PIPE_DRYRUN_ENTRY)
+        total += 1
+
+        # 2b. 遗留告警（上游已删除而目标还留着的树内文件）
+        if args.qmt_python_dir:
+            for name in _report_leftovers(source, qmt_dir,
+                                          extra_trees=(PIPE_DRYRUN_TREE,)):
+                # 树内 local_config 受模板管理，不在上游树里，跳过误报
+                if name == f"{PIPE_DRYRUN_TREE}/{LOCAL_CONFIG_NAME}":
+                    continue
+                print(f"[遗留] {name}（上游已无此文件，可手工删除）")
+
+        # 3. 生成树内 local_config（已存在则保留，绝不覆盖敏感配置）
+        config_path = qmt_dir / PIPE_DRYRUN_TREE / LOCAL_CONFIG_NAME
+        if config_path.is_file():
+            print(f"\n[保留] {config_path} 已存在，不覆盖")
+        else:
+            print(f"\n[生成] {config_path}（账户 ID + pipe 通道配置模板）")
+            text = (LOCAL_CONFIG_TEMPLATE
+                    .replace("__ACCOUNT_ID__", args.account_id or "YOUR_ACCOUNT_ID")
+                    .replace("__REDIS_BLOCK__", REDIS_BLOCK_PIPE.rstrip("\n")))
+            if not args.dry_run and args.qmt_python_dir:
+                config_path.parent.mkdir(parents=True, exist_ok=True)
+                config_path.write_text(text, encoding="utf-8")
+
+        verb = "将复制" if args.dry_run else "已复制"
+        print(f"\n完成：{verb} {total} 个文件（pipe 多文件入口）")
+        print(
+            "后续步骤：\n"
+            f"  1. 在 QMT 策略编辑器/模型交易面板运行 {PIPE_DRYRUN_ENTRY}\n"
+            "     （入口从 bigqmt_pipe_signal_trader/ 加载模块；沙箱若连\n"
+            "      os.open/kernel32 都拦，日志会明确报错，改用 --entry singlefile）\n"
             "  2. qmt-server 侧确认 bigqmt_signal_trader_client_config.py 为 pipe\n"
             "     （--client-config-out 可生成；重启 qmt-server 生效）"
         )
