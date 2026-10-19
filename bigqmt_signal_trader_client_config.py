@@ -21,8 +21,12 @@ BIGQMT_REDIS_CONFIG = {
 # Reference/history reads go straight to Big QMT's FormulaServer (port
 # 58600) instead of over RPC. Every miss falls back to RPC, so an
 # unreachable 58600 changes nothing.
+# DISABLED 2026-10-19: each FormulaServer read = a fresh TCP connect to the
+# QMT terminal's IPythonApiServer (127.0.0.1:58600), which the terminal logs
+# as "illegal IP" (client never registers as a strategy). Reads go over the
+# pipe RPC instead. Keep in sync with the site-packages copy.
 BIGQMT_FORMULA_SERVER_CONFIG = {
-    "enabled": True,
+    "enabled": False,
 }
 
 BIGQMT_LOCAL_CACHE_CONFIG = {
