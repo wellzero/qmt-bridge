@@ -35,8 +35,10 @@ from data_loader import (
     resolve_data_dir,
 )
 from pricing import (
+    _is_current_cache_fresh,
     build_live_summaries_df,
     fetch_latest_prices,
+    load_price_cache_raw,
     save_price_cache,
 )
 
@@ -52,6 +54,29 @@ st.set_page_config(
 require_auth()
 
 
+def _fetch_prices_core(
+    data_dir, server_host: str, server_port: int, server_api_key: str
+) -> tuple[dict, str]:
+    """收集全部持仓代码并从 qmt-server 拉取最新价（失败回退日 K 收盘价）。
+
+    Returns:
+        ``(prices, source)``；无持仓代码时返回 ``({}, "tick")``。
+    """
+    account_ids = list_account_ids(data_dir)
+    all_stock_codes: set[str] = set()
+    for aid in account_ids:
+        orders = load_all_orders(data_dir, aid)
+        if not orders.empty and "stock_code" in orders.columns:
+            all_stock_codes.update(orders["stock_code"].dropna().unique())
+
+    if not all_stock_codes:
+        return {}, "tick"
+
+    return fetch_latest_prices(
+        server_host, int(server_port), server_api_key, sorted(all_stock_codes)
+    )
+
+
 def _do_fetch_prices() -> None:
     """从 qmt-server 拉取最新价、保存缓存并重新计算所有账户实时统计。"""
     data_dir_input = st.session_state.get("data_dir_input", str(resolve_data_dir()))
@@ -65,23 +90,9 @@ def _do_fetch_prices() -> None:
     server_port = st.session_state.get("server_port_input", 8083)
     server_api_key = st.session_state.get("server_api_key_input", "")
 
-    account_ids = list_account_ids(data_dir)
-    all_stock_codes: set[str] = set()
-    for aid in account_ids:
-        orders = load_all_orders(data_dir, aid)
-        if not orders.empty and "stock_code" in orders.columns:
-            all_stock_codes.update(orders["stock_code"].dropna().unique())
-
-    if not all_stock_codes:
-        st.warning("未找到任何股票代码，无法更新价格")
-        return
-
     with st.spinner("正在从 qmt-server 拉取最新价（失败时回退收盘价）…"):
-        prices, source = fetch_latest_prices(
-            server_host,
-            int(server_port),
-            server_api_key,
-            sorted(all_stock_codes),
+        prices, source = _fetch_prices_core(
+            data_dir, server_host, int(server_port), server_api_key
         )
 
     if not prices:
@@ -229,6 +240,47 @@ if not data_dir.exists():
     st.error(f"数据目录不存在：``{data_dir}``")
     st.stop()
 
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _sync_prices_if_stale(
+    data_dir_str: str, server_host: str, server_port: int, server_api_key: str
+) -> str:
+    """价格缓存非当日时自动从 qmt-server 同步最新价/收盘价。
+
+    缓存停留在最后一个委托交易日时，总览与账户列表会按委托记录中的
+    成交价估值（"交易日价格"）；这里在页面加载时自动补一轮行情同步，
+    取不到实时价时回退最近交易日收盘价。同步失败静默返回，
+    沿用缓存价格，不影响页面渲染。
+
+    Returns:
+        ``"tick"`` / ``"close"``（已同步），或 ``""``（缓存新鲜 / 同步失败）。
+    """
+    d = resolve_data_dir(data_dir_str)
+    current_raw = load_price_cache_raw(d, None)
+    if current_raw and _is_current_cache_fresh(current_raw):
+        return ""
+
+    try:
+        prices, source = _fetch_prices_core(d, server_host, int(server_port), server_api_key)
+    except Exception:
+        logger.exception("自动同步行情失败，沿用缓存价格")
+        return ""
+    if not prices:
+        return ""
+
+    save_price_cache(d, prices, close=source == "close")
+    return source
+
+
+# 价格缓存非当日（隔夜 / 周末 / 服务侧从未落盘）时自动同步行情，
+# 确保总资产按当前最新价或最近收盘价估值，而非委托日成交价
+_sync_source = _sync_prices_if_stale(
+    str(data_dir),
+    st.session_state.get("server_host_input", "localhost"),
+    int(st.session_state.get("server_port_input", 8083)),
+    st.session_state.get("server_api_key_input", ""),
+)
+
 # ── 加载数据 ─────────────────────────────────────────────────────────
 
 
@@ -246,6 +298,10 @@ config, summaries_df, account_ids = _load_all(str(data_dir))
 
 # 基于最新价格缓存重新计算所有账户实时盈亏，用于总览与账户列表
 live_summaries_df = build_live_summaries_df(data_dir, config, summaries_df)
+
+if _sync_source:
+    label = "收盘价" if _sync_source == "close" else "最新价"
+    st.caption(f"行情已自动同步（{label}），总资产按同步后价格估值")
 
 # ── 总览 ─────────────────────────────────────────────────────────────
 
